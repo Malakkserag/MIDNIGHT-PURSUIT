@@ -24,6 +24,8 @@ public class PoliceChaseAI : MonoBehaviour
     [Tooltip("How fast the police turns its steering wheel (full lock per second).")]
     [SerializeField] private float steerRate = 3f;
     private float smoothSteer;
+    private bool turningAround;
+    private float turnAroundTimer;
     [Tooltip("Top-speed multiplier when far behind the player (rubber-banding).")]
     [SerializeField] private float catchUpBoost = 1.35f;
     [Tooltip("Seconds without getting closer before the police respawns on the road behind the player.")]
@@ -156,16 +158,40 @@ public class PoliceChaseAI : MonoBehaviour
 
         // Player beside/behind us at close range and we're slow? Circling won't work (a car can't turn
         // on the spot). Do a quick reverse-turn to point the nose at the player, like a 3-point turn.
-        if (closeRange && reverseTimer <= 0f && !nearTarget && distance < 10f && Mathf.Abs(angle) > 110f && car.ForwardSpeed < 5f)
-        {
-            reverseTimer = 0.8f;
-        }
+        // HIT-AND-RUN FIX: after ramming, the police used to fly past and keep going (or circle wide).
+        // Now, if the player ends up behind us nearby, we brake hard, then reverse-turn until our nose
+        // points back at them, then ram again.
+        Vector3 toPlayer = target.position - transform.position;
+        toPlayer.y = 0f;
+        float playerAngle = Vector3.SignedAngle(transform.forward, toPlayer, Vector3.up);
+        bool playerBehind = distance < 30f && Mathf.Abs(playerAngle) > 100f && HasLineOfSight();
 
-        if (reverseTimer > 0f)
+        if (turningAround)
+        {
+            // Reverse with the wheel turned AWAY from the player: the nose swings toward them.
+            car.SetInput(-1f, -Mathf.Sign(playerAngle), false);
+            turnAroundTimer -= Time.fixedDeltaTime;
+            Status = "Turning around";
+            if (Mathf.Abs(playerAngle) < 50f || turnAroundTimer <= 0f) turningAround = false;
+        }
+        else if (playerBehind && !nearTarget)
+        {
+            if (car.ForwardSpeed > 4f)
+            {
+                car.SetInput(-1f, 0f, false); // brake first (negative throttle while rolling forward)
+                Status = "Braking to turn around";
+            }
+            else
+            {
+                turningAround = true;
+                turnAroundTimer = 2f;
+            }
+        }
+        else if (reverseTimer > 0f)
         {
             reverseTimer -= Time.fixedDeltaTime;
             car.SetInput(-1f, -steer, false); // reverse and turn the other way
-            Status = closeRange ? "Turning toward player" : "Stuck - reversing";
+            Status = "Stuck - reversing";
         }
         else if (closeRange)
         {

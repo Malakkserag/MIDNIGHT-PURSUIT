@@ -47,6 +47,8 @@ public class MainMenu : MonoBehaviour
     {
         GUI.depth = -10; // draw on top of the HUD
         BuildStyles();
+        // Scale the big title with the window so "MIDNIGHT PURSUIT" always fits on one line.
+        title.fontSize = Mathf.Clamp(Mathf.RoundToInt(Screen.width / 11f), 28, 72);
         switch (GameState.Current)
         {
             case GameState.State.Menu: DrawStartMenu(); break;
@@ -144,7 +146,7 @@ public class MainMenu : MonoBehaviour
     private void BuildStyles()
     {
         if (title != null) return;
-        title = new GUIStyle(GUI.skin.label) { fontSize = 72, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter };
+        title = new GUIStyle(GUI.skin.label) { fontSize = 72, fontStyle = FontStyle.Bold, alignment = TextAnchor.MiddleCenter, wordWrap = false, clipping = TextClipping.Overflow };
         title.normal.textColor = Color.white;
         subtitle = new GUIStyle(GUI.skin.label) { fontSize = 22, alignment = TextAnchor.MiddleCenter };
         subtitle.normal.textColor = new Color(0.75f, 0.85f, 1f);
