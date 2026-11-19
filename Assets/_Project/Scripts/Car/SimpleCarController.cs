@@ -16,6 +16,8 @@ public class SimpleCarController : MonoBehaviour
     [SerializeField] private float maxSpeed = 30f;
     [SerializeField] private float turnSpeed = 120f;
     [SerializeField] private float brakeDrag = 3f;
+    [Tooltip("Slowdown when no throttle is pressed (engine braking / rolling resistance).")]
+    [SerializeField] private float coastDrag = 0.8f;
 
     [Header("Control")]
     [Tooltip("On = keyboard drives this car. Off = another script (e.g. AI) calls SetInput.")]
@@ -77,7 +79,9 @@ public class SimpleCarController : MonoBehaviour
 
     private void Update()
     {
-        if (playerControlled) ReadInput();
+        if (!playerControlled) return;
+        if (GameState.IsPlaying) ReadInput();
+        else SetInput(0f, 0f, true); // menu / paused / busted: hold the car still
     }
 
     private void FixedUpdate()
@@ -112,8 +116,18 @@ public class SimpleCarController : MonoBehaviour
             rb.AddForce(-transform.up * Mathf.Abs(forwardSpeed) * downforce, ForceMode.Acceleration);
         }
 
-        // Handbrake / natural slowdown (rolling resistance replaces the old body friction)
-        rb.linearDamping = handbrake ? brakeDrag : 0.3f;
+        // Slowdown. The body has no friction, so without this the car would drift/roll forever
+        // (and slide down any slope) when no key is pressed.
+        bool noThrottle = Mathf.Abs(throttleInput) < 0.05f;
+        rb.linearDamping = handbrake ? brakeDrag : (noThrottle ? coastDrag : 0.3f);
+
+        // Parked: no throttle and almost stopped on the ground → hold the car still.
+        if (noThrottle && IsGrounded && upright)
+        {
+            Vector3 v = rb.linearVelocity;
+            Vector3 flat = new Vector3(v.x, 0f, v.z);
+            if (flat.magnitude < 2f) rb.linearVelocity = new Vector3(0f, Mathf.Min(v.y, 0f), 0f);
+        }
 
         AutoRecover();
         groundContact = false; // refreshed by OnCollisionStay each physics step

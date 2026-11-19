@@ -70,28 +70,25 @@ public class RaceHUD : MonoBehaviour
         set => playerCar = value;
     }
 
+    private MainMenu menu;
+
     private void Awake()
     {
+        GameState.OnSceneStart();
         if (GetComponent<Minimap>() == null) gameObject.AddComponent<Minimap>();
+        menu = GetComponent<MainMenu>();
+        if (menu == null) menu = gameObject.AddComponent<MainMenu>();
     }
 
     private void Update()
     {
-        if (!PoliceChaseAI.IsBusted) escapeTime += Time.deltaTime;
+        if (GameState.IsPlaying) escapeTime += Time.deltaTime;
+        if (GameState.Current == GameState.State.Busted) menu.OnBusted(escapeTime);
 
-        if (CameraPressed() && ChaseCam != null) ChaseCam.NextView();
+        if (GameState.IsPlaying && CameraPressed() && ChaseCam != null) ChaseCam.NextView();
 
-        if (RestartPressed())
-        {
-            Scene scene = SceneManager.GetActiveScene();
-#if UNITY_EDITOR
-            // Works even if the scene isn't in Build Settings yet.
-            UnityEditor.SceneManagement.EditorSceneManager.LoadSceneInPlayMode(
-                scene.path, new LoadSceneParameters(LoadSceneMode.Single));
-#else
-            SceneManager.LoadScene(scene.buildIndex);
-#endif
-        }
+        bool inRun = GameState.IsPlaying || GameState.Current == GameState.State.Busted;
+        if (inRun && RestartPressed()) GameState.Retry();
     }
 
     private static bool CameraPressed()
@@ -124,10 +121,13 @@ public class RaceHUD : MonoBehaviour
             bigStyle.normal.textColor = new Color(1f, 0.2f, 0.2f);
         }
 
+        // The start menu has the screen to itself.
+        if (GameState.Current == GameState.State.Menu) return;
+
         float kmh = playerCar != null ? Mathf.Abs(playerCar.ForwardSpeed) * 3.6f : 0f;
         GUI.Label(new Rect(Screen.width - 320, Screen.height - 90, 300, 70), $"{kmh:0} km/h", speedStyle);
         GUI.Label(new Rect(20, 20, 500, 40), $"Escape time: {escapeTime:0.0}s", labelStyle);
-        GUI.Label(new Rect(20, 50, 500, 40), "WASD drive · Space drift · C camera · R restart", labelStyle);
+        GUI.Label(new Rect(20, 50, 720, 40), "WASD drive · Space drift · C camera · R restart · Esc pause", labelStyle);
 
         // Bust meter: fills while the police is touching you.
         float bust = 0f;
@@ -164,12 +164,6 @@ public class RaceHUD : MonoBehaviour
             if (GUI.Button(icon, GUIContent.none, GUIStyle.none)) ChaseCam.NextView();
             GUI.Label(new Rect(icon.x - 30, icon.yMax + 2, iconSize + 60, 22), ChaseCam.CurrentViewName, buttonStyle);
         }
-
-        if (PoliceChaseAI.IsBusted)
-        {
-            GUI.Label(new Rect(0, Screen.height / 2f - 80, Screen.width, 100), "BUSTED!", bigStyle);
-            GUI.Label(new Rect(Screen.width / 2f - 150, Screen.height / 2f + 20, 300, 40),
-                $"You lasted {escapeTime:0.0}s — press R", labelStyle);
-        }
+        // BUSTED / pause screens are drawn by MainMenu.
     }
 }

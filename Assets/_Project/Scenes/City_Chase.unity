@@ -60947,7 +60947,7 @@ MonoBehaviour:
   catchUpBoost: 1.35
   respawnAfter: 8
   touchGap: 0.25
-  catchContactTime: 1.2
+  bustContactTime: 0.5
   contactDrainRate: 0.35
   redLight: {fileID: 1164372153}
   blueLight: {fileID: 584410384}
@@ -60969,6 +60969,7 @@ MonoBehaviour:
   maxSpeed: 30
   turnSpeed: 120
   brakeDrag: 3
+  coastDrag: 0.8
   playerControlled: 1
   grip: 0.9
   downforce: 0.6
@@ -229573,6 +229574,7 @@ MonoBehaviour:
   maxSpeed: 30
   turnSpeed: 120
   brakeDrag: 3
+  coastDrag: 0.8
   playerControlled: 1
   grip: 0.9
   downforce: 0.25

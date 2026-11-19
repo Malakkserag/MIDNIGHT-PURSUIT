@@ -45,6 +45,7 @@ public class ChaseCamera : MonoBehaviour
     private int viewIndex;
     private float distance, height, fov;
     private Camera cam;
+    private float menuOrbitAngle;
 
     public Transform Target
     {
@@ -84,6 +85,19 @@ public class ChaseCamera : MonoBehaviour
     private void LateUpdate()
     {
         if (target == null || views.Length == 0) return;
+
+        // Start menu: slow cinematic flight around the player's car above the city.
+        if (GameState.Current == GameState.State.Menu)
+        {
+            menuOrbitAngle += 6f * Time.unscaledDeltaTime;
+            Vector3 offset = Quaternion.Euler(0f, menuOrbitAngle, 0f) * new Vector3(0f, 22f, -45f);
+            transform.position = target.position + offset;
+            transform.rotation = Quaternion.LookRotation(target.position + Vector3.up * 2f - transform.position, Vector3.up);
+            if (cam != null) cam.fieldOfView = 60f;
+            velocity = Vector3.zero;
+            currentYaw = target.eulerAngles.y;
+            return;
+        }
 
         // Glide toward the selected view.
         View v = views[viewIndex];

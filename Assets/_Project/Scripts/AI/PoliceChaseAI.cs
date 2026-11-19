@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -30,12 +30,12 @@ public class PoliceChaseAI : MonoBehaviour
     [Tooltip("Max gap (m) between the two car bodies that counts as touching. Works on any side.")]
     [SerializeField] private float touchGap = 0.1f;
     [Tooltip("Seconds of contact needed to bust the player.")]
-    [SerializeField] private float catchContactTime = 1.2f;
+    [SerializeField] private float bustContactTime = 0.5f;
     [Tooltip("How fast the contact meter empties when not touching (0.35 = takes ~3.4 s to fully empty).")]
     [SerializeField] private float contactDrainRate = 0.35f;
 
     /// <summary>0..1: how close the player is to being busted (for a HUD bar).</summary>
-    public float BustProgress => Mathf.Clamp01(closeTimer / catchContactTime);
+    public float BustProgress => Mathf.Clamp01(closeTimer / bustContactTime);
 
     [Header("Siren (optional)")]
     [SerializeField] private Light redLight;
@@ -75,6 +75,13 @@ public class PoliceChaseAI : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (!GameState.IsPlaying)
+        {
+            car.SetInput(0f, 0f, true); // wait in the menu; start delay counts from PLAY
+            Status = GameState.Current.ToString();
+            return;
+        }
+
         timeAlive += Time.fixedDeltaTime;
         if (target == null || IsBusted || timeAlive < startDelay)
         {
@@ -92,7 +99,9 @@ public class PoliceChaseAI : MonoBehaviour
         // and rams instead of chasing its tail around them.
         Rigidbody targetRb = target.GetComponent<Rigidbody>();
         Vector3 lead = targetRb != null ? targetRb.linearVelocity * Mathf.Clamp(distance / 20f, 0f, 0.6f) : Vector3.zero;
-        bool closeRange = distance < directChaseDistance;
+        // Only drive straight at the player when nothing is in between. A wall/hedge between us
+        // means: follow the road path around it instead of pushing into the wall forever.
+        bool closeRange = distance < directChaseDistance && HasLineOfSight();
         Vector3 aimPoint = closeRange ? target.position + lead : NextPathPoint();
         Vector3 toAim = aimPoint - transform.position;
         toAim.y = 0f;
@@ -107,7 +116,7 @@ public class PoliceChaseAI : MonoBehaviour
         bool nearTarget = gap < touchGap + 2f;
 
         // Stuck against a wall? Back up for a moment.
-        // (Not when pushing against the player — that's the police doing its job.)
+        // (Not when pushing against the player â€” that's the police doing its job.)
         if (Mathf.Abs(car.ForwardSpeed) < 1f && !nearTarget) stuckTimer += Time.fixedDeltaTime;
         else stuckTimer = 0f;
         if (stuckTimer > 1.2f)
@@ -119,7 +128,9 @@ public class PoliceChaseAI : MonoBehaviour
 
         // Not getting any closer for a long time (stuck, lost, or hopelessly behind)?
         // Respawn on the road behind the player, out of the player's sight.
-        if (distance < directChaseDistance || distance < bestDistance - 5f)
+        // Progress = getting closer, or actually touching the player. Merely being near
+        // (e.g. stuck behind a wall next to them) is NOT progress.
+        if (distance < bestDistance - 5f || BustProgress > 0f)
         {
             bestDistance = distance;
             noProgressTimer = 0f;
@@ -158,7 +169,7 @@ public class PoliceChaseAI : MonoBehaviour
         else
         {
             // Slow down for corners like a real driver: the sharper the turn ahead and the closer it is,
-            // the lower the safe speed. Over it → lift off / brake instead of slamming into buildings.
+            // the lower the safe speed. Over it â†’ lift off / brake instead of slamming into buildings.
             float cornerDist = FlatDistance(transform.position, aimPoint);
             float sharpness = Mathf.InverseLerp(15f, 90f, Mathf.Abs(angle));
             float nearness = Mathf.InverseLerp(40f, 8f, cornerDist);
@@ -179,9 +190,10 @@ public class PoliceChaseAI : MonoBehaviour
         // rams add up (cars bounce apart on every hit, which used to reset the timer).
         if (touching) closeTimer += Time.fixedDeltaTime;
         else closeTimer = Mathf.Max(0f, closeTimer - Time.fixedDeltaTime * contactDrainRate);
-        if (closeTimer >= catchContactTime)
+        if (closeTimer >= bustContactTime)
         {
             IsBusted = true;
+            GameState.SetBusted();
             Busted?.Invoke();
         }
     }
@@ -193,6 +205,18 @@ public class PoliceChaseAI : MonoBehaviour
 
     private float bestDistance = float.MaxValue;
     private float noProgressTimer;
+
+    private bool HasLineOfSight()
+    {
+        Vector3 from = transform.position + Vector3.up * 0.8f;
+        Vector3 to = target.position + Vector3.up * 0.8f;
+        foreach (RaycastHit h in Physics.RaycastAll(from, (to - from).normalized, Vector3.Distance(from, to)))
+        {
+            if (h.collider.transform.IsChildOf(transform) || h.collider.transform.IsChildOf(target)) continue;
+            return false;
+        }
+        return true;
+    }
 
     private bool HasPath => path != null && path.corners.Length >= 2;
 
