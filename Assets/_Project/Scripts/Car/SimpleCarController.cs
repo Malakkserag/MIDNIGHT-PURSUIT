@@ -17,6 +17,10 @@ public class SimpleCarController : MonoBehaviour
     [SerializeField] private float turnSpeed = 120f;
     [SerializeField] private float brakeDrag = 3f;
 
+    [Header("Control")]
+    [Tooltip("On = keyboard drives this car. Off = another script (e.g. AI) calls SetInput.")]
+    [SerializeField] private bool playerControlled = true;
+
     [Header("Grip")]
     [Tooltip("How strongly sideways sliding is cancelled (0 = ice, 1 = full grip).")]
     [Range(0f, 1f)][SerializeField] private float grip = 0.9f;
@@ -30,11 +34,31 @@ public class SimpleCarController : MonoBehaviour
     {
         rb = GetComponent<Rigidbody>();
         rb.centerOfMass = new Vector3(0f, -0.5f, 0f); // lower = less flipping
+        rb.interpolation = RigidbodyInterpolation.Interpolate; // smooth camera follow
     }
+
+    /// <summary>Current forward speed in m/s (negative when reversing).</summary>
+    public float ForwardSpeed => rb != null ? Vector3.Dot(rb.linearVelocity, transform.forward) : 0f;
+
+    public bool PlayerControlled
+    {
+        get => playerControlled;
+        set => playerControlled = value;
+    }
+
+    /// <summary>Drive the car from code. throttle/steer in -1..1.</summary>
+    public void SetInput(float throttle, float steer, bool brake)
+    {
+        throttleInput = Mathf.Clamp(throttle, -1f, 1f);
+        steerInput = Mathf.Clamp(steer, -1f, 1f);
+        handbrake = brake;
+    }
+
+    public void SetMaxSpeed(float value) => maxSpeed = value;
 
     private void Update()
     {
-        ReadInput();
+        if (playerControlled) ReadInput();
     }
 
     private void FixedUpdate()
