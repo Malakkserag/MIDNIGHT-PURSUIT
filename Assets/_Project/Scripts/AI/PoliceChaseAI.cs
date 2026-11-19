@@ -1,5 +1,6 @@
 using System;
 using UnityEngine;
+using UnityEngine.AI;
 
 /// <summary>
 /// Drives a SimpleCarController toward a target car. Busts the player if it stays close long enough.
@@ -15,6 +16,15 @@ public class PoliceChaseAI : MonoBehaviour
     [SerializeField] private Transform target;
     [SerializeField] private float maxSpeed = 26f;
     [SerializeField] private float startDelay = 3f;
+
+    [Header("Pathfinding (needs a baked NavMesh)")]
+    [Tooltip("Closer than this, drive straight at the player instead of following the path.")]
+    [SerializeField] private float directChaseDistance = 15f;
+    [SerializeField] private float cornerReachDistance = 6f;
+    [Tooltip("Top-speed multiplier when far behind the player (rubber-banding).")]
+    [SerializeField] private float catchUpBoost = 1.35f;
+    [Tooltip("Seconds without getting closer before the police respawns on the road behind the player.")]
+    [SerializeField] private float respawnAfter = 8f;
 
     [Header("Catching")]
     [Tooltip("Max gap (m) between the two car bodies that counts as touching. Works on any side.")]
@@ -69,8 +79,19 @@ public class PoliceChaseAI : MonoBehaviour
 
         Vector3 toTarget = target.position - transform.position;
         toTarget.y = 0f;
-        float angle = Vector3.SignedAngle(transform.forward, toTarget, Vector3.up);
+        float distance = toTarget.magnitude;
+
+        // Follow the streets: aim at the next corner of the NavMesh path (straight at the player if close
+        // or if the scene has no NavMesh baked).
+        Vector3 aimPoint = distance < directChaseDistance ? target.position : NextPathPoint();
+        Vector3 toAim = aimPoint - transform.position;
+        toAim.y = 0f;
+        float angle = Vector3.SignedAngle(transform.forward, toAim, Vector3.up);
         float steer = Mathf.Clamp(angle / 35f, -1f, 1f);
+
+        // Catch-up: the further behind, the faster (up to catchUpBoost x normal top speed).
+        float boost = Mathf.Lerp(1f, catchUpBoost, Mathf.InverseLerp(40f, 150f, distance));
+        car.SetMaxSpeed(maxSpeed * boost);
 
         float gap = BodyGap();
         bool nearTarget = gap < touchGap + 2f;
@@ -83,17 +104,41 @@ public class PoliceChaseAI : MonoBehaviour
         {
             reverseTimer = 1f;
             stuckTimer = 0f;
+            nextRepath = 0f; // pick a fresh route after backing off
+        }
+
+        // Not getting any closer for a long time (stuck, lost, or hopelessly behind)?
+        // Respawn on the road behind the player, out of the player's sight.
+        if (distance < directChaseDistance || distance < bestDistance - 5f)
+        {
+            bestDistance = distance;
+            noProgressTimer = 0f;
+        }
+        else
+        {
+            noProgressTimer += Time.fixedDeltaTime;
+        }
+        if (noProgressTimer > respawnAfter && TryRespawnBehindTarget())
+        {
+            noProgressTimer = 0f;
+            bestDistance = float.MaxValue;
+            Status = "Respawned behind player";
+            return;
         }
 
         if (reverseTimer > 0f)
         {
             reverseTimer -= Time.fixedDeltaTime;
             car.SetInput(-1f, -steer, false); // reverse and turn the other way
+            Status = "Stuck - reversing";
         }
         else
         {
             bool sharpTurn = Mathf.Abs(angle) > 70f && car.ForwardSpeed > 12f;
             car.SetInput(sharpTurn ? 0.3f : 1f, steer, sharpTurn);
+            Status = distance < directChaseDistance ? "Ramming player"
+                   : HasPath ? $"Following streets ({distance:0} m)"
+                   : $"NO PATH - driving straight ({distance:0} m)";
         }
 
         // Catch check: the physics engine reports the two car bodies actually colliding
@@ -113,6 +158,89 @@ public class PoliceChaseAI : MonoBehaviour
         {
             closeTimer = 0f;
         }
+    }
+
+    [Header("Debug (read-only)")]
+    [Tooltip("What the police is doing right now. Select PoliceCar during Play to watch it.")]
+    [SerializeField] private string status = "Waiting";
+    public string Status { get => status; private set => status = value; }
+
+    private float bestDistance = float.MaxValue;
+    private float noProgressTimer;
+
+    private bool HasPath => path != null && path.corners.Length >= 2;
+
+    private bool TryRespawnBehindTarget()
+    {
+        foreach (float back in new[] { 60f, 45f, 80f, 30f })
+        {
+            Vector3 guess = target.position - target.forward * back;
+            if (!NavMesh.SamplePosition(guess, out NavMeshHit hit, 15f, NavMesh.AllAreas)) continue;
+
+            // Don't pop into existence where the player can see it.
+            Camera cam = Camera.main;
+            if (cam != null)
+            {
+                Vector3 vp = cam.WorldToViewportPoint(hit.position);
+                if (vp.z > 0f && vp.x > 0f && vp.x < 1f && vp.y > 0f && vp.y < 1f) continue;
+            }
+
+            Rigidbody rb = GetComponent<Rigidbody>();
+            Vector3 face = target.position - hit.position;
+            face.y = 0f;
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
+            rb.position = hit.position + Vector3.up * 1f;
+            rb.rotation = Quaternion.LookRotation(face.sqrMagnitude > 0.01f ? face : target.forward, Vector3.up);
+            nextRepath = 0f;
+            return true;
+        }
+        return false;
+    }
+
+    private void OnDrawGizmosSelected()
+    {
+        if (path == null || path.corners.Length < 2) return;
+        Gizmos.color = Color.cyan;
+        Vector3[] c = path.corners;
+        for (int i = 0; i < c.Length - 1; i++) Gizmos.DrawLine(c[i] + Vector3.up, c[i + 1] + Vector3.up);
+        Gizmos.color = Color.red;
+        Gizmos.DrawSphere(c[Mathf.Min(cornerIndex, c.Length - 1)] + Vector3.up, 0.6f);
+    }
+
+    private NavMeshPath path;
+    private float nextRepath;
+    private int cornerIndex;
+
+    /// <summary>Next point to drive toward along the street path to the player.</summary>
+    private Vector3 NextPathPoint()
+    {
+        if (path == null) path = new NavMeshPath();
+
+        if (Time.time >= nextRepath)
+        {
+            nextRepath = Time.time + 0.5f;
+            cornerIndex = 1;
+            bool ok = NavMesh.SamplePosition(transform.position, out NavMeshHit from, 8f, NavMesh.AllAreas)
+                   && NavMesh.SamplePosition(target.position, out NavMeshHit to, 8f, NavMesh.AllAreas)
+                   && NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, path);
+            if (!ok) path.ClearCorners();
+        }
+
+        Vector3[] corners = path.corners;
+        if (corners.Length < 2) return target.position; // no NavMesh: old straight-line behaviour
+
+        // Skip corners we've already reached.
+        while (cornerIndex < corners.Length - 1 && FlatDistance(transform.position, corners[cornerIndex]) < cornerReachDistance)
+            cornerIndex++;
+        return corners[Mathf.Min(cornerIndex, corners.Length - 1)];
+    }
+
+    private static float FlatDistance(Vector3 a, Vector3 b)
+    {
+        a.y = 0f;
+        b.y = 0f;
+        return Vector3.Distance(a, b);
     }
 
     private bool touchingTarget;
