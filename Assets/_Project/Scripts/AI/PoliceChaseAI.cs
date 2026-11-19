@@ -18,7 +18,7 @@ public class PoliceChaseAI : MonoBehaviour
 
     [Header("Catching")]
     [Tooltip("Max gap (m) between the two car bodies that counts as touching. Works on any side.")]
-    [SerializeField] private float touchGap = 0.25f;
+    [SerializeField] private float touchGap = 0.1f;
     [Tooltip("Seconds of contact needed to bust the player.")]
     [SerializeField] private float catchContactTime = 1.2f;
 
@@ -96,8 +96,11 @@ public class PoliceChaseAI : MonoBehaviour
             car.SetInput(sharpTurn ? 0.3f : 1f, steer, sharpTurn);
         }
 
-        // Catch check: close to the player for long enough, at any speed.
-        if (gap < touchGap)
+        // Catch check: the physics engine reports the two car bodies actually colliding
+        // (any side, any speed), or they are within a hair of each other.
+        bool touching = touchingTarget || gap < touchGap;
+        touchingTarget = false; // refreshed by OnCollisionStay every physics step
+        if (touching)
         {
             closeTimer += Time.fixedDeltaTime;
             if (closeTimer >= catchContactTime)
@@ -111,6 +114,15 @@ public class PoliceChaseAI : MonoBehaviour
             closeTimer = 0f;
         }
     }
+
+    private bool touchingTarget;
+
+    private void OnCollisionStay(Collision collision)
+    {
+        if (target != null && collision.transform.IsChildOf(target)) touchingTarget = true;
+    }
+
+    private void OnCollisionEnter(Collision collision) => OnCollisionStay(collision);
 
     private Collider myCollider;
     private Collider targetCollider;

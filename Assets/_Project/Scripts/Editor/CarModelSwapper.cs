@@ -74,11 +74,7 @@ public static class CarModelSwapper
         foreach (Rigidbody r in model.GetComponentsInChildren<Rigidbody>()) Object.DestroyImmediate(r);
 
         // Fit collider to the model's bounds (in the car's local space).
-        // Measure with the car un-rotated, otherwise a turned car gets an oversized, tilted box.
-        Quaternion savedRot = car.transform.rotation;
-        car.transform.rotation = Quaternion.identity;
         Bounds b = LocalBounds(car.transform, model);
-        car.transform.rotation = savedRot;
         BoxCollider box = car.GetComponent<BoxCollider>();
         if (box == null) box = Undo.AddComponent<BoxCollider>(car);
         box.center = b.center;
@@ -123,22 +119,46 @@ public static class CarModelSwapper
         return true;
     }
 
+    [MenuItem("Midnight Pursuit/Fit Car Colliders (keep positions)")]
+    public static void FitCollidersOnly()
+    {
+        foreach (string carName in new[] { "PlayerCar", "PoliceCar" })
+        {
+            GameObject car = GameObject.Find(carName);
+            Transform model = car != null ? car.transform.Find("Model") : null;
+            BoxCollider box = car != null ? car.GetComponent<BoxCollider>() : null;
+            if (model == null || box == null) continue;
+
+            Undo.RecordObject(box, "Fit Car Collider");
+            Bounds b = LocalBounds(car.transform, model.gameObject);
+            box.center = b.center;
+            box.size = b.size;
+            Debug.Log($"Midnight Pursuit: {carName} collider = {b.size.x:0.00} x {b.size.y:0.00} x {b.size.z:0.00} m");
+        }
+        EditorSceneManager.MarkSceneDirty(EditorSceneManager.GetActiveScene());
+    }
+
+    /// <summary>
+    /// Exact model bounds in the car's local space, computed from the meshes themselves
+    /// (not Renderer.bounds, which is a world-axis box and balloons when the car is turned).
+    /// </summary>
     private static Bounds LocalBounds(Transform root, GameObject model)
     {
-        Renderer[] renderers = model.GetComponentsInChildren<Renderer>();
-        if (renderers.Length == 0) return new Bounds(Vector3.zero, new Vector3(2f, 1f, 4f));
-
+        MeshFilter[] filters = model.GetComponentsInChildren<MeshFilter>();
         bool first = true;
-        Bounds result = default;
-        foreach (Renderer r in renderers)
+        Bounds result = new Bounds(Vector3.zero, new Vector3(2f, 1f, 4f));
+        Matrix4x4 toRoot = root.worldToLocalMatrix;
+
+        foreach (MeshFilter mf in filters)
         {
-            Bounds wb = r.bounds;
-            Vector3 c = wb.center, e = wb.extents;
+            if (mf.sharedMesh == null) continue;
+            Bounds mb = mf.sharedMesh.bounds;
+            Matrix4x4 m = toRoot * mf.transform.localToWorldMatrix;
             for (int i = 0; i < 8; i++)
             {
-                Vector3 corner = c + Vector3.Scale(e, new Vector3(
+                Vector3 corner = mb.center + Vector3.Scale(mb.extents, new Vector3(
                     (i & 1) == 0 ? -1 : 1, (i & 2) == 0 ? -1 : 1, (i & 4) == 0 ? -1 : 1));
-                Vector3 local = root.InverseTransformPoint(corner);
+                Vector3 local = m.MultiplyPoint3x4(corner);
                 if (first) { result = new Bounds(local, Vector3.zero); first = false; }
                 else result.Encapsulate(local);
             }
