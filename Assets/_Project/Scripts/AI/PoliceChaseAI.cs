@@ -31,6 +31,11 @@ public class PoliceChaseAI : MonoBehaviour
     [SerializeField] private float touchGap = 0.1f;
     [Tooltip("Seconds of contact needed to bust the player.")]
     [SerializeField] private float catchContactTime = 1.2f;
+    [Tooltip("How fast the contact meter empties when not touching (0.35 = takes ~3.4 s to fully empty).")]
+    [SerializeField] private float contactDrainRate = 0.35f;
+
+    /// <summary>0..1: how close the player is to being busted (for a HUD bar).</summary>
+    public float BustProgress => Mathf.Clamp01(closeTimer / catchContactTime);
 
     [Header("Siren (optional)")]
     [SerializeField] private Light redLight;
@@ -83,7 +88,12 @@ public class PoliceChaseAI : MonoBehaviour
 
         // Follow the streets: aim at the next corner of the NavMesh path (straight at the player if close
         // or if the scene has no NavMesh baked).
-        Vector3 aimPoint = distance < directChaseDistance ? target.position : NextPathPoint();
+        // Close up: aim where the player is GOING (a little ahead of them), so the police cuts in
+        // and rams instead of chasing its tail around them.
+        Rigidbody targetRb = target.GetComponent<Rigidbody>();
+        Vector3 lead = targetRb != null ? targetRb.linearVelocity * Mathf.Clamp(distance / 20f, 0f, 0.6f) : Vector3.zero;
+        bool closeRange = distance < directChaseDistance;
+        Vector3 aimPoint = closeRange ? target.position + lead : NextPathPoint();
         Vector3 toAim = aimPoint - transform.position;
         toAim.y = 0f;
         float angle = Vector3.SignedAngle(transform.forward, toAim, Vector3.up);
@@ -126,16 +136,36 @@ public class PoliceChaseAI : MonoBehaviour
             return;
         }
 
+        // Player beside/behind us at close range and we're slow? Circling won't work (a car can't turn
+        // on the spot). Do a quick reverse-turn to point the nose at the player, like a 3-point turn.
+        if (closeRange && reverseTimer <= 0f && !nearTarget && Mathf.Abs(angle) > 75f && car.ForwardSpeed < 8f)
+        {
+            reverseTimer = 0.8f;
+        }
+
         if (reverseTimer > 0f)
         {
             reverseTimer -= Time.fixedDeltaTime;
             car.SetInput(-1f, -steer, false); // reverse and turn the other way
-            Status = "Stuck - reversing";
+            Status = closeRange ? "Turning toward player" : "Stuck - reversing";
+        }
+        else if (closeRange)
+        {
+            // Ram: full throttle at the player, no corner braking.
+            car.SetInput(1f, steer, false);
+            Status = "Ramming player";
         }
         else
         {
-            bool sharpTurn = Mathf.Abs(angle) > 70f && car.ForwardSpeed > 12f;
-            car.SetInput(sharpTurn ? 0.3f : 1f, steer, sharpTurn);
+            // Slow down for corners like a real driver: the sharper the turn ahead and the closer it is,
+            // the lower the safe speed. Over it → lift off / brake instead of slamming into buildings.
+            float cornerDist = FlatDistance(transform.position, aimPoint);
+            float sharpness = Mathf.InverseLerp(15f, 90f, Mathf.Abs(angle));
+            float nearness = Mathf.InverseLerp(40f, 8f, cornerDist);
+            float safeSpeed = Mathf.Lerp(maxSpeed * boost, 9f, sharpness * Mathf.Max(nearness, sharpness > 0.8f ? 1f : 0f));
+            float speed = car.ForwardSpeed;
+            float throttle = speed < safeSpeed ? 1f : (speed > safeSpeed + 4f ? -0.6f : 0.2f);
+            car.SetInput(throttle, steer, false);
             Status = distance < directChaseDistance ? "Ramming player"
                    : HasPath ? $"Following streets ({distance:0} m)"
                    : $"NO PATH - driving straight ({distance:0} m)";
@@ -145,18 +175,14 @@ public class PoliceChaseAI : MonoBehaviour
         // (any side, any speed), or they are within a hair of each other.
         bool touching = touchingTarget || gap < touchGap;
         touchingTarget = false; // refreshed by OnCollisionStay every physics step
-        if (touching)
+        // Contact meter: fills while touching and drains slowly between hits, so repeated
+        // rams add up (cars bounce apart on every hit, which used to reset the timer).
+        if (touching) closeTimer += Time.fixedDeltaTime;
+        else closeTimer = Mathf.Max(0f, closeTimer - Time.fixedDeltaTime * contactDrainRate);
+        if (closeTimer >= catchContactTime)
         {
-            closeTimer += Time.fixedDeltaTime;
-            if (closeTimer >= catchContactTime)
-            {
-                IsBusted = true;
-                Busted?.Invoke();
-            }
-        }
-        else
-        {
-            closeTimer = 0f;
+            IsBusted = true;
+            Busted?.Invoke();
         }
     }
 
@@ -176,6 +202,14 @@ public class PoliceChaseAI : MonoBehaviour
         {
             Vector3 guess = target.position - target.forward * back;
             if (!NavMesh.SamplePosition(guess, out NavMeshHit hit, 15f, NavMesh.AllAreas)) continue;
+
+            // Must be on the same road level as the player (not a rooftop or a plaza above/below)
+            // and actually connected to the player by road.
+            if (Mathf.Abs(hit.position.y - target.position.y) > 2f) continue;
+            if (!NavMesh.SamplePosition(target.position, out NavMeshHit playerOnNav, 8f, NavMesh.AllAreas)) continue;
+            var check = new NavMeshPath();
+            if (!NavMesh.CalculatePath(hit.position, playerOnNav.position, NavMesh.AllAreas, check)
+                || check.status != NavMeshPathStatus.PathComplete) continue;
 
             // Don't pop into existence where the player can see it.
             Camera cam = Camera.main;
@@ -224,7 +258,9 @@ public class PoliceChaseAI : MonoBehaviour
             bool ok = NavMesh.SamplePosition(transform.position, out NavMeshHit from, 8f, NavMesh.AllAreas)
                    && NavMesh.SamplePosition(target.position, out NavMeshHit to, 8f, NavMesh.AllAreas)
                    && NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, path);
-            if (!ok) path.ClearCorners();
+            // A partial path ends somewhere unreachable (e.g. player on a sidewalk island): still use it
+            // to get as close as possible, but an invalid one is dropped.
+            if (!ok || path.status == NavMeshPathStatus.PathInvalid) path.ClearCorners();
         }
 
         Vector3[] corners = path.corners;

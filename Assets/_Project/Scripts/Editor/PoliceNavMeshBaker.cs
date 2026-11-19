@@ -35,29 +35,62 @@ public static class PoliceNavMeshBaker
         SetCarAgentSettings();
         surface.agentTypeID = 0;
 
-        surface.collectObjects = CollectObjects.All;
-        surface.useGeometry = NavMeshCollectGeometry.PhysicsColliders; // the city's MeshColliders
-
-        // Cars must not punch holes in the road NavMesh: hide them during the bake.
-        GameObject[] cars = { GameObject.Find("PlayerCar"), GameObject.Find("PoliceCar") };
-        foreach (GameObject c in cars) if (c != null) c.SetActive(false);
-
+        // ROADS ONLY: build from just the asphalt parts of the city meshes (by material),
+        // so sidewalks, plazas, parks and rooftops are not drivable for the police.
+        NavMeshData data;
+        int roadPieces;
         try
         {
-            EditorUtility.DisplayProgressBar("Bake Police NavMesh", "Building NavMesh over the city...", 0.5f);
-            surface.BuildNavMesh();
+            EditorUtility.DisplayProgressBar("Bake Police NavMesh", "Collecting road surfaces...", 0.3f);
+            var sources = new System.Collections.Generic.List<NavMeshBuildSource>();
+            Bounds bounds = new Bounds();
+            bool first = true;
+            foreach (MeshRenderer mr in Object.FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None))
+            {
+                MeshFilter mf = mr.GetComponent<MeshFilter>();
+                if (mf == null || mf.sharedMesh == null || !mf.sharedMesh.isReadable && !Application.isEditor) continue;
+                Material[] mats = mr.sharedMaterials;
+                for (int sub = 0; sub < mf.sharedMesh.subMeshCount && sub < mats.Length; sub++)
+                {
+                    if (!IsRoadMaterial(mats[sub])) continue;
+                    Mesh road = ExtractSubmesh(mf.sharedMesh, sub);
+                    sources.Add(new NavMeshBuildSource
+                    {
+                        shape = NavMeshBuildSourceShape.Mesh,
+                        sourceObject = road,
+                        transform = mr.transform.localToWorldMatrix,
+                        area = 0,
+                    });
+                    Bounds wb = mr.bounds;
+                    if (first) { bounds = wb; first = false; } else bounds.Encapsulate(wb);
+                }
+            }
+            roadPieces = sources.Count;
+            if (roadPieces == 0)
+            {
+                Debug.LogError("Midnight Pursuit: no road (asphalt) meshes found in this scene.");
+                return;
+            }
+
+            EditorUtility.DisplayProgressBar("Bake Police NavMesh", $"Building NavMesh on {roadPieces} road pieces...", 0.6f);
+            bounds.Expand(10f);
+            NavMeshBuildSettings settings = NavMesh.GetSettingsByID(0);
+            data = NavMeshBuilder.BuildNavMeshData(settings, sources, bounds, Vector3.zero, Quaternion.identity);
         }
         finally
         {
-            foreach (GameObject c in cars) if (c != null) c.SetActive(true);
             EditorUtility.ClearProgressBar();
         }
 
-        if (surface.navMeshData == null)
+        if (data == null)
         {
-            Debug.LogError("Midnight Pursuit: NavMesh bake produced nothing. Did Setup City Chase add colliders?");
+            Debug.LogError("Midnight Pursuit: NavMesh bake produced nothing.");
             return;
         }
+
+        surface.RemoveData();
+        surface.navMeshData = data;
+        surface.AddData();
 
         // Save the baked data as an asset next to the scene so it survives reloads and Git.
         string assetPath = scene.path.Replace(".unity", "_NavMesh.asset");
@@ -67,7 +100,24 @@ public static class PoliceNavMeshBaker
 
         EditorSceneManager.MarkSceneDirty(scene);
         NavMeshTriangulation tri = NavMesh.CalculateTriangulation();
-        Debug.Log($"Midnight Pursuit: police NavMesh baked ({tri.indices.Length / 3} triangles) → {assetPath}. Press Ctrl+S.");
+        Debug.Log($"Midnight Pursuit: ROADS-ONLY police NavMesh baked from {roadPieces} road pieces " +
+                  $"({tri.indices.Length / 3} triangles) → {assetPath}. Press Ctrl+S.");
+    }
+
+    /// <summary>Asphalt materials of the Demo City pack (plaza "asphalt_square" excluded).</summary>
+    private static bool IsRoadMaterial(Material m)
+    {
+        if (m == null) return false;
+        string n = m.name.ToLowerInvariant();
+        return n.StartsWith("asphalt") && !n.Contains("square");
+    }
+
+    private static Mesh ExtractSubmesh(Mesh src, int sub)
+    {
+        var m = new Mesh { indexFormat = src.indexFormat, vertices = src.vertices };
+        m.SetTriangles(src.GetTriangles(sub), 0);
+        m.RecalculateBounds();
+        return m;
     }
 
     /// <summary>Sets the default NavMesh agent (ID 0) to car dimensions in Project Settings.</summary>
