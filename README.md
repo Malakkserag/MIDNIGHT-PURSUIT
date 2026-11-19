@@ -40,8 +40,4 @@ Assets/_Project/
 Assets/ThirdParty/                             imported packs
 ```
 
-## Weekly rhythm
-- **Monday:** tasks assigned on the GitHub Projects board.
-- **Wednesday:** deadline — PR opened with your work.
-- **Thursday:** review and merge PRs into `main`, test on two laptops.
-- **TA demo:** from a build of `main`.
+
