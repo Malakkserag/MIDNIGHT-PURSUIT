@@ -16,6 +16,17 @@ public class RaceHUD : MonoBehaviour
     private GUIStyle speedStyle;
     private GUIStyle labelStyle;
     private GUIStyle bigStyle;
+    private GUIStyle buttonStyle;
+    private ChaseCamera chaseCam;
+
+    private ChaseCamera ChaseCam
+    {
+        get
+        {
+            if (chaseCam == null && Camera.main != null) chaseCam = Camera.main.GetComponent<ChaseCamera>();
+            return chaseCam;
+        }
+    }
 
     public SimpleCarController PlayerCar
     {
@@ -32,6 +43,8 @@ public class RaceHUD : MonoBehaviour
     {
         if (!PoliceChaseAI.IsBusted) escapeTime += Time.deltaTime;
 
+        if (CameraPressed() && ChaseCam != null) ChaseCam.NextView();
+
         if (RestartPressed())
         {
             Scene scene = SceneManager.GetActiveScene();
@@ -43,6 +56,15 @@ public class RaceHUD : MonoBehaviour
             SceneManager.LoadScene(scene.buildIndex);
 #endif
         }
+    }
+
+    private static bool CameraPressed()
+    {
+#if ENABLE_INPUT_SYSTEM
+        return Keyboard.current != null && Keyboard.current.cKey.wasPressedThisFrame;
+#else
+        return Input.GetKeyDown(KeyCode.C);
+#endif
     }
 
     private static bool RestartPressed()
@@ -69,7 +91,18 @@ public class RaceHUD : MonoBehaviour
         float kmh = playerCar != null ? Mathf.Abs(playerCar.ForwardSpeed) * 3.6f : 0f;
         GUI.Label(new Rect(Screen.width - 320, Screen.height - 90, 300, 70), $"{kmh:0} km/h", speedStyle);
         GUI.Label(new Rect(20, 20, 500, 40), $"Escape time: {escapeTime:0.0}s", labelStyle);
-        GUI.Label(new Rect(20, 50, 500, 40), "WASD drive · Space drift · R restart", labelStyle);
+        GUI.Label(new Rect(20, 50, 500, 40), "WASD drive · Space drift · C camera · R restart", labelStyle);
+
+        // Camera view button, bottom-right above the speedometer.
+        if (ChaseCam != null)
+        {
+            if (buttonStyle == null)
+            {
+                buttonStyle = new GUIStyle(GUI.skin.button) { fontSize = 18, fontStyle = FontStyle.Bold };
+            }
+            Rect btn = new Rect(Screen.width - 200, Screen.height - 150, 180, 44);
+            if (GUI.Button(btn, $"CAMERA: {ChaseCam.CurrentViewName}", buttonStyle)) ChaseCam.NextView();
+        }
 
         if (PoliceChaseAI.IsBusted)
         {
