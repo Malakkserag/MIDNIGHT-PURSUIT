@@ -33,7 +33,11 @@ public class SimpleCarController : MonoBehaviour
     private void Awake()
     {
         rb = GetComponent<Rigidbody>();
-        rb.centerOfMass = new Vector3(0f, -0.5f, 0f); // lower = less flipping
+        // Put the center of mass near the bottom of the collider = much less flipping.
+        BoxCollider box = GetComponent<BoxCollider>();
+        rb.centerOfMass = box != null
+            ? box.center - new Vector3(0f, box.size.y * 0.45f, 0f)
+            : new Vector3(0f, -0.5f, 0f);
         rb.interpolation = RigidbodyInterpolation.Interpolate; // smooth camera follow
     }
 
@@ -84,6 +88,31 @@ public class SimpleCarController : MonoBehaviour
 
         // Handbrake / natural slowdown
         rb.linearDamping = handbrake ? brakeDrag : 0.2f;
+
+        AutoFlip();
+    }
+
+    private float flippedTimer;
+
+    /// <summary>If the car stays on its side or roof, put it back on its wheels.</summary>
+    private void AutoFlip()
+    {
+        if (transform.up.y < 0.5f && rb.linearVelocity.magnitude < 3f)
+        {
+            flippedTimer += Time.fixedDeltaTime;
+            if (flippedTimer > 1.5f)
+            {
+                flippedTimer = 0f;
+                rb.linearVelocity = Vector3.zero;
+                rb.angularVelocity = Vector3.zero;
+                rb.position += Vector3.up * 1.5f;
+                rb.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
+            }
+        }
+        else
+        {
+            flippedTimer = 0f;
+        }
     }
 
     private void ReadInput()

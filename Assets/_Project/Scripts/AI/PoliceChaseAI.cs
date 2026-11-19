@@ -14,11 +14,13 @@ public class PoliceChaseAI : MonoBehaviour
 
     [SerializeField] private Transform target;
     [SerializeField] private float maxSpeed = 26f;
-    [SerializeField] private float startDelay = 2f;
+    [SerializeField] private float startDelay = 3f;
 
     [Header("Catching")]
-    [SerializeField] private float catchDistance = 5f;
-    [SerializeField] private float catchTime = 1.5f;
+    [Tooltip("Max gap (m) between the two car bodies that counts as contact. Works on any side.")]
+    [SerializeField] private float closeGap = 1.5f;
+    [Tooltip("Seconds of contact needed to bust the player.")]
+    [SerializeField] private float catchContactTime = 1.2f;
 
     [Header("Siren (optional)")]
     [SerializeField] private Light redLight;
@@ -70,8 +72,12 @@ public class PoliceChaseAI : MonoBehaviour
         float angle = Vector3.SignedAngle(transform.forward, toTarget, Vector3.up);
         float steer = Mathf.Clamp(angle / 35f, -1f, 1f);
 
+        float gap = BodyGap();
+        bool nearTarget = gap < closeGap + 2f;
+
         // Stuck against a wall? Back up for a moment.
-        if (Mathf.Abs(car.ForwardSpeed) < 1f) stuckTimer += Time.fixedDeltaTime;
+        // (Not when pushing against the player — that's the police doing its job.)
+        if (Mathf.Abs(car.ForwardSpeed) < 1f && !nearTarget) stuckTimer += Time.fixedDeltaTime;
         else stuckTimer = 0f;
         if (stuckTimer > 1.2f)
         {
@@ -90,11 +96,11 @@ public class PoliceChaseAI : MonoBehaviour
             car.SetInput(sharpTurn ? 0.3f : 1f, steer, sharpTurn);
         }
 
-        // Catch check
-        if (toTarget.magnitude < catchDistance)
+        // Catch check: close to the player for long enough, at any speed.
+        if (gap < closeGap)
         {
             closeTimer += Time.fixedDeltaTime;
-            if (closeTimer >= catchTime)
+            if (closeTimer >= catchContactTime)
             {
                 IsBusted = true;
                 Busted?.Invoke();
@@ -104,6 +110,28 @@ public class PoliceChaseAI : MonoBehaviour
         {
             closeTimer = 0f;
         }
+    }
+
+    private Collider myCollider;
+    private Collider targetCollider;
+
+    /// <summary>Distance between the surfaces of the two car bodies (0 = touching), on any side.</summary>
+    private float BodyGap()
+    {
+        if (myCollider == null) myCollider = GetComponent<Collider>();
+        if (targetCollider == null || targetCollider.transform != target) targetCollider = target.GetComponent<Collider>();
+        if (myCollider == null || targetCollider == null)
+            return Vector3.Distance(transform.position, target.position); // fallback
+
+        // Bounce between the two bodies a few times to find the true closest pair of points.
+        Vector3 onMe = myCollider.bounds.center;
+        Vector3 onTarget = targetCollider.ClosestPoint(onMe);
+        for (int i = 0; i < 4; i++)
+        {
+            onMe = myCollider.ClosestPoint(onTarget);
+            onTarget = targetCollider.ClosestPoint(onMe);
+        }
+        return Vector3.Distance(onTarget, onMe);
     }
 
     private void FlashSiren()
