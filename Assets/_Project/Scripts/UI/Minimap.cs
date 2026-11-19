@@ -9,8 +9,9 @@ using UnityEngine;
 /// </summary>
 public class Minimap : MonoBehaviour
 {
-    [SerializeField] private int screenSize = 260;
-    [SerializeField] private int margin = 20;
+    [Tooltip("Minimap width/height as a fraction of screen height, so it scales with the window.")]
+    [Range(0.1f, 0.5f)][SerializeField] private float sizeOfScreen = 0.22f;
+    [SerializeField] private int margin = 16;
     [SerializeField] private int textureSize = 1024;
     [Tooltip("Brightens the dark night map so streets are readable.")]
     [SerializeField] private float mapBrightness = 2.5f;
@@ -69,6 +70,7 @@ public class Minimap : MonoBehaviour
     {
         if (mapTexture == null || mapCamera == null) return;
 
+        float screenSize = Screen.height * sizeOfScreen;
         Rect r = new Rect(Screen.width - screenSize - margin, margin, screenSize, screenSize);
 
         // Frame + map
@@ -92,17 +94,17 @@ public class Minimap : MonoBehaviour
             if (police)
             {
                 c = Mathf.Repeat(Time.time * 4f, 2f) < 1f ? Color.red : new Color(0.2f, 0.5f, 1f);
-                size = 10f;
+                size = 7f;
             }
             else if (car.PlayerControlled)
             {
                 c = Color.cyan;
-                size = 12f;
+                size = 8f;
             }
             else
             {
                 c = Color.yellow;
-                size = 8f;
+                size = 6f;
             }
 
             DrawMarker(pos, car.transform.eulerAngles.y, size, c, car.PlayerControlled && !police);
@@ -119,7 +121,7 @@ public class Minimap : MonoBehaviour
         GUI.color = color;
         GUI.DrawTexture(new Rect(pos.x - size / 2, pos.y - size / 2, size, size), white);
         if (withArrow) // nose shows which way you're facing
-            GUI.DrawTexture(new Rect(pos.x - 2, pos.y - size / 2 - 7, 4, 7), white);
+            GUI.DrawTexture(new Rect(pos.x - 1.5f, pos.y - size / 2 - 5, 3, 5), white);
 
         GUI.color = Color.white;
         GUI.matrix = old;
