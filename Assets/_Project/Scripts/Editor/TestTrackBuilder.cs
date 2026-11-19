@@ -71,40 +71,7 @@ public static class TestTrackBuilder
         RampAt(ramps, new Vector3(-18, 0.8f, 54), 180f, ramp);
         RampAt(ramps, new Vector3(54, 0.8f, -18), -90f, ramp);
 
-        // Player car
-        GameObject player = BuildCar("PlayerCar", new Vector3(0, 0.6f, -40), playerPaint, glass);
-        player.AddComponent<SimpleCarController>();
-        Headlights(player.transform);
-
-        // Police car, starting behind the player
-        GameObject police = BuildCar("PoliceCar", new Vector3(0, 0.6f, -56), policePaint, glass);
-        police.AddComponent<SimpleCarController>();
-        PoliceChaseAI ai = police.AddComponent<PoliceChaseAI>();
-        ai.Target = player.transform;
-        Light red = SirenLight(police.transform, "Siren_Red", new Vector3(-0.4f, 1.6f, 0), Color.red);
-        Light blue = SirenLight(police.transform, "Siren_Blue", new Vector3(0.4f, 1.6f, 0), new Color(0.2f, 0.4f, 1f));
-        ai.SetSirenLights(red, blue);
-        Headlights(police.transform);
-
-        // Camera
-        Camera cam = Camera.main;
-        if (cam == null)
-        {
-            GameObject camGo = new GameObject("Main Camera") { tag = "MainCamera" };
-            cam = camGo.AddComponent<Camera>();
-            Undo.RegisterCreatedObjectUndo(camGo, "Build Test Track");
-        }
-        Undo.SetTransformParent(cam.transform, null, "Build Test Track");
-        cam.transform.position = player.transform.position + new Vector3(0, 3, -8);
-        ChaseCamera follow = cam.GetComponent<ChaseCamera>();
-        if (follow == null) follow = Undo.AddComponent<ChaseCamera>(cam.gameObject);
-        follow.Target = player.transform;
-        cam.farClipPlane = 400f;
-
-        // HUD
-        GameObject hud = new GameObject("HUD");
-        Undo.RegisterCreatedObjectUndo(hud, "Build Test Track");
-        hud.AddComponent<RaceHUD>().PlayerCar = player.GetComponent<SimpleCarController>();
+        GameObject player = SpawnChase(new Vector3(0, 0.6f, -40), 0f, out Camera cam);
 
         // Night lighting
         foreach (Light l in Object.FindObjectsByType<Light>(FindObjectsSortMode.None))
@@ -125,6 +92,64 @@ public static class TestTrackBuilder
         Selection.activeGameObject = player;
         EditorSceneManager.MarkSceneDirty(player.scene);
         Debug.Log("Midnight Pursuit: test track built. Press Ctrl+S to save, then Play.");
+    }
+
+    /// <summary>
+    /// Creates PlayerCar, PoliceCar (16 m behind), chase camera and HUD.
+    /// Removes any existing PlayerCar / PoliceCar / HUD first. Returns the player.
+    /// </summary>
+    public static GameObject SpawnChase(Vector3 playerPos, float yaw, out Camera cam)
+    {
+        if (Camera.main != null && Camera.main.transform.parent != null)
+            Undo.SetTransformParent(Camera.main.transform, null, "Spawn Chase");
+        foreach (string old in new[] { "PlayerCar", "PoliceCar", "HUD" })
+        {
+            GameObject existing = GameObject.Find(old);
+            if (existing != null) Undo.DestroyObjectImmediate(existing);
+        }
+
+        Material playerPaint = GetMaterial("PlayerPaint", new Color(0.1f, 0.5f, 1f));
+        Material policePaint = GetMaterial("PolicePaint", new Color(0.95f, 0.95f, 0.95f));
+        Material glass = GetMaterial("Glass", new Color(0.05f, 0.05f, 0.08f));
+        Quaternion rot = Quaternion.Euler(0f, yaw, 0f);
+
+        // Player car
+        GameObject player = BuildCar("PlayerCar", playerPos, playerPaint, glass);
+        player.transform.rotation = rot;
+        player.AddComponent<SimpleCarController>();
+        Headlights(player.transform);
+
+        // Police car, starting behind the player
+        GameObject police = BuildCar("PoliceCar", playerPos - rot * Vector3.forward * 16f, policePaint, glass);
+        police.transform.rotation = rot;
+        police.AddComponent<SimpleCarController>();
+        PoliceChaseAI ai = police.AddComponent<PoliceChaseAI>();
+        ai.Target = player.transform;
+        Light red = SirenLight(police.transform, "Siren_Red", new Vector3(-0.4f, 1.6f, 0), Color.red);
+        Light blue = SirenLight(police.transform, "Siren_Blue", new Vector3(0.4f, 1.6f, 0), new Color(0.2f, 0.4f, 1f));
+        ai.SetSirenLights(red, blue);
+        Headlights(police.transform);
+
+        // Camera
+        cam = Camera.main;
+        if (cam == null)
+        {
+            GameObject camGo = new GameObject("Main Camera") { tag = "MainCamera" };
+            cam = camGo.AddComponent<Camera>();
+            Undo.RegisterCreatedObjectUndo(camGo, "Spawn Chase");
+        }
+        cam.transform.position = player.transform.position + rot * new Vector3(0, 3, -8);
+        ChaseCamera follow = cam.GetComponent<ChaseCamera>();
+        if (follow == null) follow = Undo.AddComponent<ChaseCamera>(cam.gameObject);
+        follow.Target = player.transform;
+        cam.farClipPlane = 400f;
+
+        // HUD
+        GameObject hud = new GameObject("HUD");
+        Undo.RegisterCreatedObjectUndo(hud, "Build Test Track");
+        hud.AddComponent<RaceHUD>().PlayerCar = player.GetComponent<SimpleCarController>();
+
+        return player;
     }
 
     private static GameObject BuildCar(string name, Vector3 pos, Material paint, Material glass)

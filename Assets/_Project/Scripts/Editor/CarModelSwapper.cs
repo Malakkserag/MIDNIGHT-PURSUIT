@@ -74,15 +74,32 @@ public static class CarModelSwapper
         foreach (Rigidbody r in model.GetComponentsInChildren<Rigidbody>()) Object.DestroyImmediate(r);
 
         // Fit collider to the model's bounds (in the car's local space).
+        // Measure with the car un-rotated, otherwise a turned car gets an oversized, tilted box.
+        Quaternion savedRot = car.transform.rotation;
+        car.transform.rotation = Quaternion.identity;
         Bounds b = LocalBounds(car.transform, model);
+        car.transform.rotation = savedRot;
         BoxCollider box = car.GetComponent<BoxCollider>();
         if (box == null) box = Undo.AddComponent<BoxCollider>(car);
         box.center = b.center;
         box.size = b.size;
 
-        // Sit the car on the ground.
+        // Sit the car on whatever ground is below it (works on flat tracks and in the city).
         Vector3 p = car.transform.position;
-        p.y = -b.min.y + 0.05f;
+        float groundY = 0f;
+        float closest = float.MaxValue;
+        Physics.SyncTransforms();
+        // RaycastAll is unordered: take the HIGHEST surface below (the road), not something underneath it.
+        foreach (RaycastHit hit in Physics.RaycastAll(p + Vector3.up * 5f, Vector3.down, 50f))
+        {
+            if (hit.collider.transform.IsChildOf(car.transform)) continue;
+            if (hit.distance < closest)
+            {
+                closest = hit.distance;
+                groundY = hit.point.y;
+            }
+        }
+        p.y = groundY - b.min.y + 0.05f;
         car.transform.position = p;
 
         // Move lights to the new body.

@@ -17,8 +17,8 @@ public class PoliceChaseAI : MonoBehaviour
     [SerializeField] private float startDelay = 3f;
 
     [Header("Catching")]
-    [Tooltip("Max gap (m) between the two car bodies that counts as contact. Works on any side.")]
-    [SerializeField] private float closeGap = 1.5f;
+    [Tooltip("Max gap (m) between the two car bodies that counts as touching. Works on any side.")]
+    [SerializeField] private float touchGap = 0.25f;
     [Tooltip("Seconds of contact needed to bust the player.")]
     [SerializeField] private float catchContactTime = 1.2f;
 
@@ -73,7 +73,7 @@ public class PoliceChaseAI : MonoBehaviour
         float steer = Mathf.Clamp(angle / 35f, -1f, 1f);
 
         float gap = BodyGap();
-        bool nearTarget = gap < closeGap + 2f;
+        bool nearTarget = gap < touchGap + 2f;
 
         // Stuck against a wall? Back up for a moment.
         // (Not when pushing against the player — that's the police doing its job.)
@@ -97,7 +97,7 @@ public class PoliceChaseAI : MonoBehaviour
         }
 
         // Catch check: close to the player for long enough, at any speed.
-        if (gap < closeGap)
+        if (gap < touchGap)
         {
             closeTimer += Time.fixedDeltaTime;
             if (closeTimer >= catchContactTime)

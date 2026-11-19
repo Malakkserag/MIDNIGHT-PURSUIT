@@ -23,6 +23,11 @@ public class RaceHUD : MonoBehaviour
         set => playerCar = value;
     }
 
+    private void Awake()
+    {
+        if (GetComponent<Minimap>() == null) gameObject.AddComponent<Minimap>();
+    }
+
     private void Update()
     {
         if (!PoliceChaseAI.IsBusted) escapeTime += Time.deltaTime;
