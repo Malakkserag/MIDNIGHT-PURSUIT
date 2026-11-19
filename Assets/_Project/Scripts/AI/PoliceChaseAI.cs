@@ -21,6 +21,9 @@ public class PoliceChaseAI : MonoBehaviour
     [Tooltip("Closer than this, drive straight at the player instead of following the path.")]
     [SerializeField] private float directChaseDistance = 15f;
     [SerializeField] private float cornerReachDistance = 6f;
+    [Tooltip("How fast the police turns its steering wheel (full lock per second).")]
+    [SerializeField] private float steerRate = 3f;
+    private float smoothSteer;
     [Tooltip("Top-speed multiplier when far behind the player (rubber-banding).")]
     [SerializeField] private float catchUpBoost = 1.35f;
     [Tooltip("Seconds without getting closer before the police respawns on the road behind the player.")]
@@ -106,7 +109,11 @@ public class PoliceChaseAI : MonoBehaviour
         Vector3 toAim = aimPoint - transform.position;
         toAim.y = 0f;
         float angle = Vector3.SignedAngle(transform.forward, toAim, Vector3.up);
-        float steer = Mathf.Clamp(angle / 35f, -1f, 1f);
+        // Smooth steering: turn the wheel gradually instead of snapping left/right every frame
+        // (the snapping caused the zig-zag "weird" driving).
+        float targetSteer = Mathf.Clamp(angle / 45f, -1f, 1f);
+        smoothSteer = Mathf.MoveTowards(smoothSteer, targetSteer, steerRate * Time.fixedDeltaTime);
+        float steer = smoothSteer;
 
         // Catch-up: the further behind, the faster (up to catchUpBoost x normal top speed).
         float boost = Mathf.Lerp(1f, catchUpBoost, Mathf.InverseLerp(40f, 150f, distance));
@@ -149,7 +156,7 @@ public class PoliceChaseAI : MonoBehaviour
 
         // Player beside/behind us at close range and we're slow? Circling won't work (a car can't turn
         // on the spot). Do a quick reverse-turn to point the nose at the player, like a 3-point turn.
-        if (closeRange && reverseTimer <= 0f && !nearTarget && Mathf.Abs(angle) > 75f && car.ForwardSpeed < 8f)
+        if (closeRange && reverseTimer <= 0f && !nearTarget && distance < 10f && Mathf.Abs(angle) > 110f && car.ForwardSpeed < 5f)
         {
             reverseTimer = 0.8f;
         }
@@ -290,10 +297,32 @@ public class PoliceChaseAI : MonoBehaviour
         Vector3[] corners = path.corners;
         if (corners.Length < 2) return target.position; // no NavMesh: old straight-line behaviour
 
-        // Skip corners we've already reached.
-        while (cornerIndex < corners.Length - 1 && FlatDistance(transform.position, corners[cornerIndex]) < cornerReachDistance)
-            cornerIndex++;
-        return corners[Mathf.Min(cornerIndex, corners.Length - 1)];
+        // "Carrot on a stick": aim at a point a fixed distance AHEAD along the route (further at speed),
+        // not at the next corner itself. Gives smooth, wide turns instead of jerky corner-to-corner driving.
+        float lookahead = Mathf.Clamp(8f + Mathf.Abs(car.ForwardSpeed) * 0.6f, 8f, 30f);
+        return PointAlongPath(corners, lookahead);
+    }
+
+    private Vector3 PointAlongPath(Vector3[] corners, float lookahead)
+    {
+        // Start from the point on the path closest to us (projected onto the first segment).
+        Vector3 pos = transform.position;
+        Vector3 a = corners[0], b = corners[1];
+        Vector3 ab = b - a;
+        float t = ab.sqrMagnitude > 0.01f ? Mathf.Clamp01(Vector3.Dot(pos - a, ab) / ab.sqrMagnitude) : 1f;
+        Vector3 current = a + ab * t;
+        float remaining = lookahead;
+
+        for (int i = 1; i < corners.Length; i++)
+        {
+            Vector3 next = corners[i];
+            float seg = FlatDistance(current, next);
+            if (seg >= remaining) return Vector3.Lerp(current, next, remaining / Mathf.Max(seg, 0.001f));
+            remaining -= seg;
+            current = next;
+        }
+        cornerIndex = corners.Length - 1;
+        return corners[corners.Length - 1];
     }
 
     private static float FlatDistance(Vector3 a, Vector3 b)
