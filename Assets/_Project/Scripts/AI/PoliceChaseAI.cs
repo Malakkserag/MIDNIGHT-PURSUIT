@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -21,6 +21,11 @@ public class PoliceChaseAI : MonoBehaviour
     [Tooltip("Closer than this, drive straight at the player instead of following the path.")]
     [SerializeField] private float directChaseDistance = 15f;
     [SerializeField] private float cornerReachDistance = 6f;
+    [Tooltip("How fast the police turns its steering wheel (full lock per second).")]
+    [SerializeField] private float steerRate = 3f;
+    private float smoothSteer;
+    private bool turningAround;
+    private float turnAroundTimer;
     [Tooltip("Top-speed multiplier when far behind the player (rubber-banding).")]
     [SerializeField] private float catchUpBoost = 1.35f;
     [Tooltip("Seconds without getting closer before the police respawns on the road behind the player.")]
@@ -30,7 +35,12 @@ public class PoliceChaseAI : MonoBehaviour
     [Tooltip("Max gap (m) between the two car bodies that counts as touching. Works on any side.")]
     [SerializeField] private float touchGap = 0.1f;
     [Tooltip("Seconds of contact needed to bust the player.")]
-    [SerializeField] private float catchContactTime = 1.2f;
+    [SerializeField] private float bustContactTime = 0.5f;
+    [Tooltip("How fast the contact meter empties when not touching (0.35 = takes ~3.4 s to fully empty).")]
+    [SerializeField] private float contactDrainRate = 0.35f;
+
+    /// <summary>0..1: how close the player is to being busted (for a HUD bar).</summary>
+    public float BustProgress => Mathf.Clamp01(closeTimer / bustContactTime);
 
     [Header("Siren (optional)")]
     [SerializeField] private Light redLight;
@@ -70,6 +80,13 @@ public class PoliceChaseAI : MonoBehaviour
 
     private void FixedUpdate()
     {
+        if (!GameState.IsPlaying)
+        {
+            car.SetInput(0f, 0f, true); // wait in the menu; start delay counts from PLAY
+            Status = GameState.Current.ToString();
+            return;
+        }
+
         timeAlive += Time.fixedDeltaTime;
         if (target == null || IsBusted || timeAlive < startDelay)
         {
@@ -83,11 +100,22 @@ public class PoliceChaseAI : MonoBehaviour
 
         // Follow the streets: aim at the next corner of the NavMesh path (straight at the player if close
         // or if the scene has no NavMesh baked).
-        Vector3 aimPoint = distance < directChaseDistance ? target.position : NextPathPoint();
+        // Close up: aim where the player is GOING (a little ahead of them), so the police cuts in
+        // and rams instead of chasing its tail around them.
+        Rigidbody targetRb = target.GetComponent<Rigidbody>();
+        Vector3 lead = targetRb != null ? targetRb.linearVelocity * Mathf.Clamp(distance / 20f, 0f, 0.6f) : Vector3.zero;
+        // Only drive straight at the player when nothing is in between. A wall/hedge between us
+        // means: follow the road path around it instead of pushing into the wall forever.
+        bool closeRange = distance < directChaseDistance && HasLineOfSight();
+        Vector3 aimPoint = closeRange ? target.position + lead : NextPathPoint();
         Vector3 toAim = aimPoint - transform.position;
         toAim.y = 0f;
         float angle = Vector3.SignedAngle(transform.forward, toAim, Vector3.up);
-        float steer = Mathf.Clamp(angle / 35f, -1f, 1f);
+        // Smooth steering: turn the wheel gradually instead of snapping left/right every frame
+        // (the snapping caused the zig-zag "weird" driving).
+        float targetSteer = Mathf.Clamp(angle / 45f, -1f, 1f);
+        smoothSteer = Mathf.MoveTowards(smoothSteer, targetSteer, steerRate * Time.fixedDeltaTime);
+        float steer = smoothSteer;
 
         // Catch-up: the further behind, the faster (up to catchUpBoost x normal top speed).
         float boost = Mathf.Lerp(1f, catchUpBoost, Mathf.InverseLerp(40f, 150f, distance));
@@ -97,7 +125,7 @@ public class PoliceChaseAI : MonoBehaviour
         bool nearTarget = gap < touchGap + 2f;
 
         // Stuck against a wall? Back up for a moment.
-        // (Not when pushing against the player — that's the police doing its job.)
+        // (Not when pushing against the player â€” that's the police doing its job.)
         if (Mathf.Abs(car.ForwardSpeed) < 1f && !nearTarget) stuckTimer += Time.fixedDeltaTime;
         else stuckTimer = 0f;
         if (stuckTimer > 1.2f)
@@ -109,7 +137,9 @@ public class PoliceChaseAI : MonoBehaviour
 
         // Not getting any closer for a long time (stuck, lost, or hopelessly behind)?
         // Respawn on the road behind the player, out of the player's sight.
-        if (distance < directChaseDistance || distance < bestDistance - 5f)
+        // Progress = getting closer, or actually touching the player. Merely being near
+        // (e.g. stuck behind a wall next to them) is NOT progress.
+        if (distance < bestDistance - 5f || BustProgress > 0f)
         {
             bestDistance = distance;
             noProgressTimer = 0f;
@@ -126,16 +156,60 @@ public class PoliceChaseAI : MonoBehaviour
             return;
         }
 
-        if (reverseTimer > 0f)
+        // Player beside/behind us at close range and we're slow? Circling won't work (a car can't turn
+        // on the spot). Do a quick reverse-turn to point the nose at the player, like a 3-point turn.
+        // HIT-AND-RUN FIX: after ramming, the police used to fly past and keep going (or circle wide).
+        // Now, if the player ends up behind us nearby, we brake hard, then reverse-turn until our nose
+        // points back at them, then ram again.
+        Vector3 toPlayer = target.position - transform.position;
+        toPlayer.y = 0f;
+        float playerAngle = Vector3.SignedAngle(transform.forward, toPlayer, Vector3.up);
+        bool playerBehind = distance < 30f && Mathf.Abs(playerAngle) > 100f && HasLineOfSight();
+
+        if (turningAround)
+        {
+            // Reverse with the wheel turned AWAY from the player: the nose swings toward them.
+            car.SetInput(-1f, -Mathf.Sign(playerAngle), false);
+            turnAroundTimer -= Time.fixedDeltaTime;
+            Status = "Turning around";
+            if (Mathf.Abs(playerAngle) < 50f || turnAroundTimer <= 0f) turningAround = false;
+        }
+        else if (playerBehind && !nearTarget)
+        {
+            if (car.ForwardSpeed > 4f)
+            {
+                car.SetInput(-1f, 0f, false); // brake first (negative throttle while rolling forward)
+                Status = "Braking to turn around";
+            }
+            else
+            {
+                turningAround = true;
+                turnAroundTimer = 2f;
+            }
+        }
+        else if (reverseTimer > 0f)
         {
             reverseTimer -= Time.fixedDeltaTime;
             car.SetInput(-1f, -steer, false); // reverse and turn the other way
             Status = "Stuck - reversing";
         }
+        else if (closeRange)
+        {
+            // Ram: full throttle at the player, no corner braking.
+            car.SetInput(1f, steer, false);
+            Status = "Ramming player";
+        }
         else
         {
-            bool sharpTurn = Mathf.Abs(angle) > 70f && car.ForwardSpeed > 12f;
-            car.SetInput(sharpTurn ? 0.3f : 1f, steer, sharpTurn);
+            // Slow down for corners like a real driver: the sharper the turn ahead and the closer it is,
+            // the lower the safe speed. Over it â†’ lift off / brake instead of slamming into buildings.
+            float cornerDist = FlatDistance(transform.position, aimPoint);
+            float sharpness = Mathf.InverseLerp(15f, 90f, Mathf.Abs(angle));
+            float nearness = Mathf.InverseLerp(40f, 8f, cornerDist);
+            float safeSpeed = Mathf.Lerp(maxSpeed * boost, 9f, sharpness * Mathf.Max(nearness, sharpness > 0.8f ? 1f : 0f));
+            float speed = car.ForwardSpeed;
+            float throttle = speed < safeSpeed ? 1f : (speed > safeSpeed + 4f ? -0.6f : 0.2f);
+            car.SetInput(throttle, steer, false);
             Status = distance < directChaseDistance ? "Ramming player"
                    : HasPath ? $"Following streets ({distance:0} m)"
                    : $"NO PATH - driving straight ({distance:0} m)";
@@ -145,18 +219,15 @@ public class PoliceChaseAI : MonoBehaviour
         // (any side, any speed), or they are within a hair of each other.
         bool touching = touchingTarget || gap < touchGap;
         touchingTarget = false; // refreshed by OnCollisionStay every physics step
-        if (touching)
+        // Contact meter: fills while touching and drains slowly between hits, so repeated
+        // rams add up (cars bounce apart on every hit, which used to reset the timer).
+        if (touching) closeTimer += Time.fixedDeltaTime;
+        else closeTimer = Mathf.Max(0f, closeTimer - Time.fixedDeltaTime * contactDrainRate);
+        if (closeTimer >= bustContactTime)
         {
-            closeTimer += Time.fixedDeltaTime;
-            if (closeTimer >= catchContactTime)
-            {
-                IsBusted = true;
-                Busted?.Invoke();
-            }
-        }
-        else
-        {
-            closeTimer = 0f;
+            IsBusted = true;
+            GameState.SetBusted();
+            Busted?.Invoke();
         }
     }
 
@@ -168,6 +239,18 @@ public class PoliceChaseAI : MonoBehaviour
     private float bestDistance = float.MaxValue;
     private float noProgressTimer;
 
+    private bool HasLineOfSight()
+    {
+        Vector3 from = transform.position + Vector3.up * 0.8f;
+        Vector3 to = target.position + Vector3.up * 0.8f;
+        foreach (RaycastHit h in Physics.RaycastAll(from, (to - from).normalized, Vector3.Distance(from, to)))
+        {
+            if (h.collider.transform.IsChildOf(transform) || h.collider.transform.IsChildOf(target)) continue;
+            return false;
+        }
+        return true;
+    }
+
     private bool HasPath => path != null && path.corners.Length >= 2;
 
     private bool TryRespawnBehindTarget()
@@ -176,6 +259,14 @@ public class PoliceChaseAI : MonoBehaviour
         {
             Vector3 guess = target.position - target.forward * back;
             if (!NavMesh.SamplePosition(guess, out NavMeshHit hit, 15f, NavMesh.AllAreas)) continue;
+
+            // Must be on the same road level as the player (not a rooftop or a plaza above/below)
+            // and actually connected to the player by road.
+            if (Mathf.Abs(hit.position.y - target.position.y) > 2f) continue;
+            if (!NavMesh.SamplePosition(target.position, out NavMeshHit playerOnNav, 8f, NavMesh.AllAreas)) continue;
+            var check = new NavMeshPath();
+            if (!NavMesh.CalculatePath(hit.position, playerOnNav.position, NavMesh.AllAreas, check)
+                || check.status != NavMeshPathStatus.PathComplete) continue;
 
             // Don't pop into existence where the player can see it.
             Camera cam = Camera.main;
@@ -224,16 +315,40 @@ public class PoliceChaseAI : MonoBehaviour
             bool ok = NavMesh.SamplePosition(transform.position, out NavMeshHit from, 8f, NavMesh.AllAreas)
                    && NavMesh.SamplePosition(target.position, out NavMeshHit to, 8f, NavMesh.AllAreas)
                    && NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, path);
-            if (!ok) path.ClearCorners();
+            // A partial path ends somewhere unreachable (e.g. player on a sidewalk island): still use it
+            // to get as close as possible, but an invalid one is dropped.
+            if (!ok || path.status == NavMeshPathStatus.PathInvalid) path.ClearCorners();
         }
 
         Vector3[] corners = path.corners;
         if (corners.Length < 2) return target.position; // no NavMesh: old straight-line behaviour
 
-        // Skip corners we've already reached.
-        while (cornerIndex < corners.Length - 1 && FlatDistance(transform.position, corners[cornerIndex]) < cornerReachDistance)
-            cornerIndex++;
-        return corners[Mathf.Min(cornerIndex, corners.Length - 1)];
+        // "Carrot on a stick": aim at a point a fixed distance AHEAD along the route (further at speed),
+        // not at the next corner itself. Gives smooth, wide turns instead of jerky corner-to-corner driving.
+        float lookahead = Mathf.Clamp(8f + Mathf.Abs(car.ForwardSpeed) * 0.6f, 8f, 30f);
+        return PointAlongPath(corners, lookahead);
+    }
+
+    private Vector3 PointAlongPath(Vector3[] corners, float lookahead)
+    {
+        // Start from the point on the path closest to us (projected onto the first segment).
+        Vector3 pos = transform.position;
+        Vector3 a = corners[0], b = corners[1];
+        Vector3 ab = b - a;
+        float t = ab.sqrMagnitude > 0.01f ? Mathf.Clamp01(Vector3.Dot(pos - a, ab) / ab.sqrMagnitude) : 1f;
+        Vector3 current = a + ab * t;
+        float remaining = lookahead;
+
+        for (int i = 1; i < corners.Length; i++)
+        {
+            Vector3 next = corners[i];
+            float seg = FlatDistance(current, next);
+            if (seg >= remaining) return Vector3.Lerp(current, next, remaining / Mathf.Max(seg, 0.001f));
+            remaining -= seg;
+            current = next;
+        }
+        cornerIndex = corners.Length - 1;
+        return corners[corners.Length - 1];
     }
 
     private static float FlatDistance(Vector3 a, Vector3 b)

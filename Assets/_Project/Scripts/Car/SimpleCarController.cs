@@ -16,6 +16,8 @@ public class SimpleCarController : MonoBehaviour
     [SerializeField] private float maxSpeed = 30f;
     [SerializeField] private float turnSpeed = 120f;
     [SerializeField] private float brakeDrag = 3f;
+    [Tooltip("Slowdown when no throttle is pressed (engine braking / rolling resistance).")]
+    [SerializeField] private float coastDrag = 0.8f;
 
     [Header("Control")]
     [Tooltip("On = keyboard drives this car. Off = another script (e.g. AI) calls SetInput.")]
@@ -39,6 +41,21 @@ public class SimpleCarController : MonoBehaviour
             ? box.center - new Vector3(0f, box.size.y * 0.45f, 0f)
             : new Vector3(0f, -0.5f, 0f);
         rb.interpolation = RigidbodyInterpolation.Interpolate; // smooth camera follow
+
+        // The body is a box sliding on the road: with normal friction (made worse by downforce)
+        // it acted like a brake and capped the speed around 53 km/h. This script handles grip
+        // and slowdown itself, so the body gets zero friction.
+        if (box != null)
+        {
+            box.material = new PhysicsMaterial("CarBody")
+            {
+                dynamicFriction = 0f,
+                staticFriction = 0f,
+                frictionCombine = PhysicsMaterialCombine.Minimum,
+                bounciness = 0f,
+                bounceCombine = PhysicsMaterialCombine.Minimum,
+            };
+        }
     }
 
     /// <summary>Current forward speed in m/s (negative when reversing).</summary>
@@ -62,57 +79,120 @@ public class SimpleCarController : MonoBehaviour
 
     private void Update()
     {
-        if (playerControlled) ReadInput();
+        if (!playerControlled) return;
+        if (GameState.IsPlaying) ReadInput();
+        else SetInput(0f, 0f, true); // menu / paused / busted: hold the car still
     }
 
     private void FixedUpdate()
     {
-        Vector3 velocity = rb.linearVelocity;
-        float forwardSpeed = Vector3.Dot(velocity, transform.forward);
+        IsGrounded = CheckGrounded();
+        bool upright = transform.up.y > 0.7f;
 
-        // Throttle
-        if (Mathf.Abs(forwardSpeed) < maxSpeed || Mathf.Sign(throttleInput) != Mathf.Sign(forwardSpeed))
+        // Only drive/steer with wheels on the road. Pushing while airborne or tilted is what
+        // launched cars into the air and onto their sides.
+        if (IsGrounded && upright)
         {
-            rb.AddForce(transform.forward * throttleInput * acceleration, ForceMode.Acceleration);
+            Vector3 velocity = rb.linearVelocity;
+            float forwardSpeed = Vector3.Dot(velocity, transform.forward);
+
+            // Throttle
+            if (Mathf.Abs(forwardSpeed) < maxSpeed || Mathf.Sign(throttleInput) != Mathf.Sign(forwardSpeed))
+            {
+                rb.AddForce(transform.forward * throttleInput * acceleration, ForceMode.Acceleration);
+            }
+
+            // Steering (scaled by speed so the car can't spin in place)
+            float speedFactor = Mathf.Clamp01(Mathf.Abs(forwardSpeed) / 5f);
+            float turn = steerInput * turnSpeed * speedFactor * Mathf.Sign(forwardSpeed) * Time.fixedDeltaTime;
+            rb.MoveRotation(rb.rotation * Quaternion.Euler(0f, turn, 0f));
+
+            // Grip: remove part of the sideways velocity
+            Vector3 sideways = Vector3.Dot(rb.linearVelocity, transform.right) * transform.right;
+            float currentGrip = handbrake ? grip * 0.3f : grip;
+            rb.AddForce(-sideways * currentGrip, ForceMode.VelocityChange);
+
+            // Downforce: faster = pressed harder onto the road, so kerbs don't launch the car.
+            rb.AddForce(-transform.up * Mathf.Abs(forwardSpeed) * downforce, ForceMode.Acceleration);
         }
 
-        // Steering (scaled by speed so the car can't spin in place)
-        float speedFactor = Mathf.Clamp01(Mathf.Abs(forwardSpeed) / 5f);
-        float turn = steerInput * turnSpeed * speedFactor * Mathf.Sign(forwardSpeed) * Time.fixedDeltaTime;
-        rb.MoveRotation(rb.rotation * Quaternion.Euler(0f, turn, 0f));
+        // Slowdown. The body has no friction, so without this the car would drift/roll forever
+        // (and slide down any slope) when no key is pressed.
+        bool noThrottle = Mathf.Abs(throttleInput) < 0.05f;
+        rb.linearDamping = handbrake ? brakeDrag : (noThrottle ? coastDrag : 0.3f);
 
-        // Grip: remove part of the sideways velocity
-        Vector3 sideways = Vector3.Dot(rb.linearVelocity, transform.right) * transform.right;
-        float currentGrip = handbrake ? grip * 0.3f : grip;
-        rb.AddForce(-sideways * currentGrip, ForceMode.VelocityChange);
+        // Parked: no throttle and almost stopped on the ground → hold the car still.
+        if (noThrottle && IsGrounded && upright)
+        {
+            Vector3 v = rb.linearVelocity;
+            Vector3 flat = new Vector3(v.x, 0f, v.z);
+            if (flat.magnitude < 2f) rb.linearVelocity = new Vector3(0f, Mathf.Min(v.y, 0f), 0f);
+        }
 
-        // Handbrake / natural slowdown
-        rb.linearDamping = handbrake ? brakeDrag : 0.2f;
-
-        AutoFlip();
+        AutoRecover();
+        groundContact = false; // refreshed by OnCollisionStay each physics step
     }
 
-    private float flippedTimer;
+    private bool groundContact;
 
-    /// <summary>If the car stays on its side or roof, put it back on its wheels.</summary>
-    private void AutoFlip()
+    private void OnCollisionStay(Collision collision)
     {
-        if (transform.up.y < 0.5f && rb.linearVelocity.magnitude < 3f)
+        foreach (ContactPoint c in collision.contacts)
         {
-            flippedTimer += Time.fixedDeltaTime;
-            if (flippedTimer > 1.5f)
-            {
-                flippedTimer = 0f;
-                rb.linearVelocity = Vector3.zero;
-                rb.angularVelocity = Vector3.zero;
-                rb.position += Vector3.up * 1.5f;
-                rb.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
-            }
+            if (Vector3.Dot(c.normal, transform.up) > 0.5f) { groundContact = true; return; }
         }
-        else
+    }
+
+    [Header("Stability")]
+    [SerializeField] private float downforce = 0.25f;
+    [Tooltip("Seconds flipped, on its side, or in the air before the car is put back on the road.")]
+    [SerializeField] private float recoverAfter = 1.5f;
+
+    public bool IsGrounded { get; private set; }
+
+    private float troubleTimer;
+
+    private bool CheckGrounded()
+    {
+        if (groundContact) return true; // physically resting on something below
+
+        BoxCollider box = GetComponent<BoxCollider>();
+        float halfHeight = box != null ? box.size.y * 0.5f : 0.5f;
+        Vector3 origin = transform.TransformPoint(box != null ? box.center : Vector3.zero);
+        foreach (RaycastHit hit in Physics.RaycastAll(origin, -transform.up, halfHeight + 0.6f))
         {
-            flippedTimer = 0f;
+            if (hit.rigidbody == rb) continue;
+            return true;
         }
+        return false;
+    }
+
+    /// <summary>
+    /// Flipped, on its side, or flying for 1.5 s → put the car back upright on the nearest road.
+    /// </summary>
+    private void AutoRecover()
+    {
+        bool tilted = transform.up.y < 0.7f;
+        // "Flying" = no ground under the car AND really off the road (rising or falling fast),
+        // so small bumps at speed never trigger a reset.
+        bool flying = !IsGrounded && Mathf.Abs(rb.linearVelocity.y) > 2f;
+        if (tilted || flying) troubleTimer += Time.fixedDeltaTime;
+        else troubleTimer = 0f;
+
+        if (troubleTimer < recoverAfter) return;
+        troubleTimer = 0f;
+
+        Vector3 pos = rb.position;
+        // Prefer the nearest point on the road network (NavMesh), else the ground right below.
+        if (UnityEngine.AI.NavMesh.SamplePosition(pos, out UnityEngine.AI.NavMeshHit nav, 15f, UnityEngine.AI.NavMesh.AllAreas))
+            pos = nav.position;
+        else if (Physics.Raycast(pos + Vector3.up * 20f, Vector3.down, out RaycastHit ground, 60f))
+            pos = ground.point;
+
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+        rb.position = pos + Vector3.up * 1f;
+        rb.rotation = Quaternion.Euler(0f, transform.eulerAngles.y, 0f);
     }
 
     private void ReadInput()
