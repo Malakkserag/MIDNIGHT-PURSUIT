@@ -16,8 +16,7 @@ Three modes on one shared city: **Cops & Robbers**, **Midnight Race**, **Surviva
 | Branch | Purpose | Who merges |
 |---|---|---|
 | `main` | Always playable. TA demos are built from here. | Team leader only |
-| `dev` | Integration of finished tasks. | Team leader via Pull Request |
-| `feature/<name>-<task>` | One branch per task, e.g. `feature/omar-city-blockout` | Owner opens a PR into `dev` |
+| `feature/<name>-<task>` | One branch per task, e.g. `feature/omar-city-blockout` | Owner opens a PR into `main` |
 
 Daily flow in GitHub Desktop: **Fetch → switch to your branch → work → Commit → Push → open Pull Request**.
 
@@ -44,5 +43,5 @@ Assets/ThirdParty/                             imported packs
 ## Weekly rhythm
 - **Monday:** tasks assigned on the GitHub Projects board.
 - **Wednesday:** deadline — PR opened with your work.
-- **Thursday:** integration into `dev`, test on two laptops, merge to `main`.
+- **Thursday:** review and merge PRs into `main`, test on two laptops.
 - **TA demo:** from a build of `main`.
