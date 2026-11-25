@@ -76,6 +76,7 @@ public class RaceHUD : MonoBehaviour
     {
         GameState.OnSceneStart();
         if (GetComponent<Minimap>() == null) gameObject.AddComponent<Minimap>();
+        if (GetComponent<GLRadar>() == null) gameObject.AddComponent<GLRadar>();
         menu = GetComponent<MainMenu>();
         if (menu == null) menu = gameObject.AddComponent<MainMenu>();
     }
@@ -127,7 +128,6 @@ public class RaceHUD : MonoBehaviour
         float kmh = playerCar != null ? Mathf.Abs(playerCar.ForwardSpeed) * 3.6f : 0f;
         GUI.Label(new Rect(Screen.width - 320, Screen.height - 90, 300, 70), $"{kmh:0} km/h", speedStyle);
         GUI.Label(new Rect(20, 20, 500, 40), $"Escape time: {escapeTime:0.0}s", labelStyle);
-        GUI.Label(new Rect(20, 50, 720, 40), "WASD drive · Space drift · C camera · R restart · Esc pause", labelStyle);
 
         // Bust meter: fills while the police is touching you.
         float bust = 0f;
@@ -135,7 +135,7 @@ public class RaceHUD : MonoBehaviour
             bust = Mathf.Max(bust, p.BustProgress);
         if (bust > 0.01f && !PoliceChaseAI.IsBusted)
         {
-            Rect bar = new Rect(20, 88, 260, 14);
+            Rect bar = new Rect(20, 58, 260, 14);
             GUI.color = new Color(0f, 0f, 0f, 0.6f);
             GUI.DrawTexture(bar, Texture2D.whiteTexture);
             GUI.color = Color.Lerp(new Color(1f, 0.6f, 0f), Color.red, bust);
