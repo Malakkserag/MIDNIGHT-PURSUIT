@@ -64,12 +64,6 @@ A **NavMesh** was baked on the roads only, so the police drive along streets ins
 
 ![Police on the road only](Screenshots/20_police_on_road_only.webp)
 
-**Bugs we hit along the way** (and fixed):
-
-![Police circling the player](Screenshots/bugs/bug_police_circling_player.png)
-![Police flying](Screenshots/bugs/bug_police_flying.png)
-![Police stuck behind a wall](Screenshots/bugs/bug_police_stuck_behind_wall.webp)
-
 ### 2.5 Camera views
 
 A clickable camera icon (or the **C** key) switches between **Close, Wide, Overhead** and **Driver** views.
@@ -133,15 +127,9 @@ The project can also be switched to render through the **OpenGLCore** backend (P
 
 ---
 
-## 5. Physics and AI bug fixes
+## 5. Driving physics and police AI
 
-| Problem | Cause | Fix |
-|---|---|---|
-| Cars spinning like tops after a hit | Car bodies have zero friction; nothing slowed collision spin | Damp yaw/roll/pitch spin every physics step while grounded; angular damping + max angular velocity |
-| Cars passing through buildings | At 30+ m/s a car moves further than a wall's thickness in one physics step | `CollisionDetectionMode.ContinuousDynamic` |
-| Car on another car's roof could still drive | Any upward contact counted as "ground" | Only static colliders count as ground |
-| Police driving into walls | Only followed the path, never looked ahead | Three ray "whiskers" ahead that steer away from walls and slow down |
-| Police wiggling back and forth | Turn-around manoeuvre restarted forever | Stops when facing the player / blocked / timed out, then a 3 s cooldown |
+Cars use continuous collision detection so they can't pass through walls at high speed, and spin from crashes is damped so they stay stable. The police look ahead with ray "whiskers" to steer around walls.
 
 ---
 
