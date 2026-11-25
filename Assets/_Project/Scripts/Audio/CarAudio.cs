@@ -13,7 +13,9 @@ public class CarAudio : MonoBehaviour
     [SerializeField] private float crashThreshold = 3.5f;
 
     private SimpleCarController car;
-    private AudioSource engine, siren, fx;
+    private AudioSource engine, siren, yelp, fx;
+    private PoliceChaseAI police;
+    private float yelpMix;
     private bool isPlayer, isPolice;
     private float nextCrash;
 
@@ -31,6 +33,12 @@ public class CarAudio : MonoBehaviour
             siren.minDistance = 12f;
             siren.maxDistance = 150f;
             siren.Play();
+            yelp = NewSource(ProcAudio.SirenYelp, true);
+            yelp.minDistance = 12f;
+            yelp.maxDistance = 150f;
+            yelp.volume = 0f;
+            yelp.Play();
+            police = GetComponent<PoliceChaseAI>();
         }
         fx = NewSource(null, false);
     }
@@ -60,7 +68,14 @@ public class CarAudio : MonoBehaviour
         if (siren != null)
         {
             bool active = GameState.Current != GameState.State.Menu;
-            siren.volume = active ? GameSettings.Siren * 0.7f : 0f;
+            // Far away: slow wail. Closing in (< 45 m): fast yelp. Crossfade between them.
+            float dist = police != null && police.Target != null
+                ? Vector3.Distance(transform.position, police.Target.position) : 999f;
+            float target = dist < 45f ? 1f : 0f;
+            yelpMix = Mathf.MoveTowards(yelpMix, target, Time.deltaTime * 1.5f);
+            float vol = active ? GameSettings.Siren * 0.7f : 0f;
+            siren.volume = vol * (1f - yelpMix);
+            yelp.volume = vol * yelpMix;
         }
     }
 

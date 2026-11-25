@@ -137,29 +137,66 @@ public class MainMenu : MonoBehaviour
         optLabel.fontSize = optValue.fontSize = Mathf.RoundToInt(19 * s);
         optHeader.fontSize = Mathf.RoundToInt(22 * s);
 
-        float x = area.x + 30 * s, w = area.width - 60 * s, y = area.y + 20 * s, row = 40 * s;
+        float x = area.x + 30 * s, w = area.width - 60 * s, y = area.y + 16 * s, row = 46 * s;
 
-        GUI.Label(new Rect(x, y, w, row), "SOUND", optHeader); y += row;
-        GameSettings.Master = VolumeRow(ref y, x, w, row, s, "Master volume", GameSettings.Master);
-        GameSettings.Engine = VolumeRow(ref y, x, w, row, s, "Engine", GameSettings.Engine);
-        GameSettings.Effects = VolumeRow(ref y, x, w, row, s, "Effects (crashes, pickups)", GameSettings.Effects);
-        GameSettings.Siren = VolumeRow(ref y, x, w, row, s, "Police siren", GameSettings.Siren);
-        bool muted = GUI.Toggle(new Rect(x, y, w, row), GameSettings.Muted, "  Mute all sound", optLabel);
-        if (muted != GameSettings.Muted) GameSettings.Muted = muted;
-        y += row * 1.3f;
+        // ----- Tabs: SOUND | CONTROLS -----
+        float tabW = w / 2f, tabH = 44 * s;
+        for (int t = 0; t < 2; t++)
+        {
+            Rect tab = new Rect(x + t * tabW, y, tabW, tabH);
+            bool selected = optionsTab == t;
+            bool hover = tab.Contains(Event.current.mousePosition);
+            Fill(tab, selected ? new Color(0.25f, 0.85f, 1f, 0.18f) : new Color(1f, 1f, 1f, hover ? 0.08f : 0.03f));
+            Fill(new Rect(tab.x, tab.yMax - 3 * s, tab.width, 3 * s),
+                 selected ? new Color(0.25f, 0.85f, 1f) : new Color(1f, 1f, 1f, 0.15f));
+            Color keep = optHeader.normal.textColor;
+            optHeader.normal.textColor = selected ? new Color(0.25f, 0.85f, 1f) : new Color(1f, 1f, 1f, 0.6f);
+            optHeader.alignment = TextAnchor.MiddleCenter;
+            GUI.Label(tab, t == 0 ? "SOUND" : "CONTROLS", optHeader);
+            optHeader.alignment = TextAnchor.MiddleLeft;
+            optHeader.normal.textColor = keep;
+            if (!selected && GUI.Button(tab, GUIContent.none, GUIStyle.none))
+            {
+                optionsTab = t;
+                AudioManager.PlayUI(ProcAudio.Click, 0.8f);
+            }
+        }
+        y += tabH + 18 * s;
 
-        GUI.Label(new Rect(x, y, w, row), "CONTROLS", optHeader); y += row;
-        string[,] keys =
+        if (optionsTab == 0)
         {
-            { "W / ↑", "Accelerate" }, { "S / ↓", "Brake / reverse" }, { "A D / ← →", "Steer" },
-            { "SPACE", "Handbrake drift" }, { "C", "Change camera" }, { "R", "Restart" }, { "ESC", "Pause / back" },
-        };
-        float half = w / 2f, small = row * 0.75f;
-        for (int i = 0; i < keys.GetLength(0); i++)
+            GameSettings.Master = VolumeRow(ref y, x, w, row, s, "Master volume", GameSettings.Master);
+            GameSettings.Engine = VolumeRow(ref y, x, w, row, s, "Engine", GameSettings.Engine);
+            GameSettings.Effects = VolumeRow(ref y, x, w, row, s, "Crashes & pickups", GameSettings.Effects);
+            GameSettings.Siren = VolumeRow(ref y, x, w, row, s, "Police siren", GameSettings.Siren);
+
+            // Mute checkbox
+            Rect boxR = new Rect(x, y + row * 0.25f, row * 0.5f, row * 0.5f);
+            Fill(boxR, new Color(1f, 1f, 1f, 0.15f));
+            if (GameSettings.Muted)
+                Fill(new Rect(boxR.x + 4 * s, boxR.y + 4 * s, boxR.width - 8 * s, boxR.height - 8 * s), new Color(0.25f, 0.85f, 1f));
+            GUI.Label(new Rect(boxR.xMax + 12 * s, y, w, row), "Mute all sound", optLabel);
+            if (GUI.Button(new Rect(x, y, w * 0.5f, row), GUIContent.none, GUIStyle.none))
+            {
+                GameSettings.Muted = !GameSettings.Muted;
+                AudioManager.PlayUI(ProcAudio.Click, 0.8f);
+            }
+        }
+        else
         {
-            float cx = x + (i % 2) * half, cy = y + (i / 2) * small;
-            GUI.Label(new Rect(cx, cy, half * 0.38f, small), "<b>" + keys[i, 0] + "</b>", RichLabel);
-            GUI.Label(new Rect(cx + half * 0.38f, cy, half * 0.62f, small), keys[i, 1], optLabel);
+            string[,] keys =
+            {
+                { "W  /  ↑", "Accelerate" }, { "S  /  ↓", "Brake / reverse" }, { "A D  /  ← →", "Steer" },
+                { "SPACE", "Handbrake drift" }, { "C", "Change camera" }, { "R", "Restart" }, { "ESC", "Pause / back" },
+            };
+            float keyW = w * 0.38f, small = row * 0.85f;
+            for (int i = 0; i < keys.GetLength(0); i++)
+            {
+                float cy = y + i * small;
+                if (i % 2 == 0) Fill(new Rect(x, cy, w, small), new Color(1f, 1f, 1f, 0.04f));
+                GUI.Label(new Rect(x + 12 * s, cy, keyW, small), "<b>" + keys[i, 0] + "</b>", RichLabel);
+                GUI.Label(new Rect(x + keyW, cy, w - keyW, small), keys[i, 1], optLabel);
+            }
         }
 
         float bw = Mathf.Min(220 * s, area.width * 0.6f), bh = 54 * s;
@@ -177,13 +214,73 @@ public class MainMenu : MonoBehaviour
         }
     }
 
+    private int optionsTab; // 0 = Sound, 1 = Controls
+
     private float VolumeRow(ref float y, float x, float w, float row, float s, string label, float value)
     {
-        GUI.Label(new Rect(x, y, w * 0.45f, row), label, optLabel);
-        float v = GUI.HorizontalSlider(new Rect(x + w * 0.47f, y + row * 0.4f, w * 0.4f, row * 0.5f), value, 0f, 1f);
-        GUI.Label(new Rect(x + w * 0.88f, y, w * 0.12f, row), $"{Mathf.RoundToInt(v * 100)}%", optValue);
+        GUI.Label(new Rect(x, y, w * 0.4f, row), label, optLabel);
+        float v = VolumeSlider(new Rect(x + w * 0.42f, y, w * 0.44f, row), value, s);
+        GUI.Label(new Rect(x + w * 0.86f, y, w * 0.14f, row), $"{Mathf.RoundToInt(v * 100)}%", optValue);
         y += row;
         return v;
+    }
+
+    /// <summary>
+    /// Custom volume bar: dark track, cyan fill up to the value, round-ish white knob.
+    /// Click or drag anywhere on the row to set it; plays a tick on release so you hear the new level.
+    /// </summary>
+    private static float VolumeSlider(Rect row, float value, float s)
+    {
+        int id = GUIUtility.GetControlID(FocusType.Passive);
+        float trackH = 8f * s;
+        Rect track = new Rect(row.x, row.center.y - trackH / 2f, row.width, trackH);
+        Event e = Event.current;
+
+        switch (e.GetTypeForControl(id))
+        {
+            case EventType.MouseDown:
+                if (row.Contains(e.mousePosition))
+                {
+                    GUIUtility.hotControl = id;
+                    value = Mathf.Clamp01((e.mousePosition.x - track.x) / track.width);
+                    e.Use();
+                }
+                break;
+            case EventType.MouseDrag:
+                if (GUIUtility.hotControl == id)
+                {
+                    value = Mathf.Clamp01((e.mousePosition.x - track.x) / track.width);
+                    e.Use();
+                }
+                break;
+            case EventType.MouseUp:
+                if (GUIUtility.hotControl == id)
+                {
+                    GUIUtility.hotControl = 0;
+                    AudioManager.PlayUI(ProcAudio.Click, 0.8f);
+                    e.Use();
+                }
+                break;
+            case EventType.Repaint:
+                bool active = GUIUtility.hotControl == id || row.Contains(e.mousePosition);
+                Fill(track, new Color(1f, 1f, 1f, 0.12f));
+                Fill(new Rect(track.x, track.y, track.width * value, track.height),
+                     Color.Lerp(new Color(0.1f, 0.55f, 0.9f), new Color(0.25f, 0.9f, 1f), value));
+                float k = (active ? 22f : 18f) * s;
+                Rect knob = new Rect(track.x + track.width * value - k / 2f, row.center.y - k / 2f, k, k);
+                Fill(new Rect(knob.x - 2 * s, knob.y - 2 * s, knob.width + 4 * s, knob.height + 4 * s), new Color(0f, 0f, 0f, 0.5f));
+                Fill(knob, Color.white);
+                break;
+        }
+        return value;
+    }
+
+    private static void Fill(Rect r, Color c)
+    {
+        Color keep = GUI.color;
+        GUI.color = c;
+        GUI.DrawTexture(r, Texture2D.whiteTexture);
+        GUI.color = keep;
     }
 
     // ---------- Pause menu: dark side panel on the right, game still visible on the left ----------

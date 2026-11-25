@@ -19,12 +19,53 @@ public static class ProcAudio
         return Soft(saw * (0.6f + 0.4f * rumble) * 0.45f);
     });
 
-    /// <summary>Looping two-tone police wail (rises and falls once per second).</summary>
-    public static AudioClip Siren => siren != null ? siren : siren = MakePhase("Siren", 2f, 0.28f, t =>
+    /// <summary>
+    /// Police "WAIL" (used when the police is far): a slow climb to a high pitch, then a long
+    /// slide back down — 4 s per cycle — through a harsh horn-speaker tone.
+    /// </summary>
+    public static AudioClip Siren => siren != null ? siren : siren = MakeSiren("SirenWail", 4f, t =>
     {
-        float sweep = 0.5f - 0.5f * Mathf.Cos(t * Mathf.PI); // 0→1→0 over 2 s
-        return Mathf.Lerp(650f, 1350f, sweep);
+        float u = t / 4f;
+        float k = u < 0.4f ? Mathf.SmoothStep(0f, 1f, u / 0.4f)        // fast rise (1.6 s)
+                           : 1f - Mathf.SmoothStep(0f, 1f, (u - 0.4f) / 0.6f); // slow fall (2.4 s)
+        return Mathf.Lerp(520f, 1450f, k);
     });
+
+    /// <summary>
+    /// Police "YELP" (used when the police is close): the same tone sweeping up and down very fast,
+    /// the urgent sound real police cars switch to during a chase.
+    /// </summary>
+    public static AudioClip SirenYelp => sirenYelp != null ? sirenYelp : sirenYelp = MakeSiren("SirenYelp", 1.2f, t =>
+    {
+        float u = (t / 0.3f) % 1f; // 4 sweeps per loop
+        float k = u < 0.7f ? u / 0.7f : 1f - (u - 0.7f) / 0.3f;
+        return Mathf.Lerp(650f, 1550f, k);
+    });
+
+    private static AudioClip sirenYelp;
+
+    /// <summary>
+    /// Siren voice: odd harmonics (square-ish, like a horn speaker), a little clipping for grit,
+    /// and a quiet second voice detuned by a few Hz for a thicker "two speakers" sound.
+    /// </summary>
+    private static AudioClip MakeSiren(string name, float seconds, System.Func<float, float> freq)
+    {
+        double p1 = 0, p2 = 0;
+        return Make(name, seconds, (t, i) =>
+        {
+            float f = freq(t);
+            p1 += f / Rate;
+            p2 += (f * 1.006f) / Rate;
+            float a = (float)(p1 * Mathf.PI * 2.0), b = (float)(p2 * Mathf.PI * 2.0);
+            float voice = Mathf.Sin(a) + Mathf.Sin(3f * a) / 3f + Mathf.Sin(5f * a) / 5f + Mathf.Sin(7f * a) / 9f;
+            float second = Mathf.Sin(b) + Mathf.Sin(3f * b) / 3f;
+            float s = voice * 0.75f + second * 0.3f;
+            s = Mathf.Clamp(s * 1.4f, -1f, 1f);          // horn speaker grit
+            // Fade the first/last 10 ms so the loop point never clicks.
+            float edge = Mathf.Clamp01(Mathf.Min(t, seconds - t) / 0.01f);
+            return s * 0.32f * Mathf.Lerp(0.6f, 1f, edge);
+        });
+    }
 
     /// <summary>Metal crunch: decaying, low-passed noise with a thump.</summary>
     public static AudioClip Crash => crash != null ? crash : crash = MakeFiltered("Crash", 0.7f, t =>
