@@ -188,7 +188,10 @@ public class RaceHUD : MonoBehaviour
             GUI.color = Color.Lerp(new Color(1f, 0.6f, 0f), Color.red, bust);
             GUI.DrawTexture(new Rect(bar.x, bar.y, bar.width * bust, bar.height), Texture2D.whiteTexture);
             GUI.color = Color.white;
-            GUI.Label(new Rect(bar.xMax + 8, bar.y - 6, 120, 26), "BUSTING!", labelStyle);
+            TextAnchor keep = labelStyle.alignment;
+            labelStyle.alignment = TextAnchor.UpperCenter;
+            GUI.Label(new Rect(bar.x, bar.yMax + 4, bar.width, 26), "BUSTING!", labelStyle);
+            labelStyle.alignment = keep;
         }
 
         // Camera view button, bottom-right above the speedometer.
