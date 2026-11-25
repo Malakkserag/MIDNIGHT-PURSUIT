@@ -22,6 +22,7 @@ public class TrafficManager : MonoBehaviour
         new Color(0.9f, 0.45f, 0.1f),
     };
 
+    private static GameObject[] models;
     private readonly List<TrafficCar> cars = new List<TrafficCar>();
     private SimpleCarController player;
     private float nextCheck;
@@ -108,14 +109,25 @@ public class TrafficManager : MonoBehaviour
         var rb = go.AddComponent<Rigidbody>();
         rb.mass = playerRb != null ? playerRb.mass : 1200f;
 
-        // Visual: copy of the player's model, repainted.
+        // Visual: a real colour variant of the sports car (Resources/TrafficCars: red, white, black,
+        // yellow, green, grey...). Falls back to a repainted copy of the player's model.
+        if (models == null) models = Resources.LoadAll<GameObject>("TrafficCars");
         Transform model = player.transform.Find("Model");
-        if (model != null)
+        GameObject source = models.Length > 0 ? models[Random.Range(0, models.Length)] : (model != null ? model.gameObject : null);
+        if (source != null)
         {
-            GameObject m = Instantiate(model.gameObject, go.transform, false);
+            GameObject m = Instantiate(source, go.transform, false);
             m.name = "Model";
+            if (model != null) // same placement as the player's model (some models are turned 180°)
+            {
+                m.transform.localPosition = model.localPosition;
+                m.transform.localRotation = model.localRotation;
+                m.transform.localScale = model.localScale;
+            }
             foreach (Collider c in m.GetComponentsInChildren<Collider>()) Destroy(c);
-            Repaint(m, Paints[Random.Range(0, Paints.Length)]);
+            foreach (Rigidbody r in m.GetComponentsInChildren<Rigidbody>()) Destroy(r);
+            foreach (Animator a in m.GetComponentsInChildren<Animator>()) Destroy(a);
+            if (models.Length == 0) Repaint(m, Paints[Random.Range(0, Paints.Length)]);
         }
         else
         {

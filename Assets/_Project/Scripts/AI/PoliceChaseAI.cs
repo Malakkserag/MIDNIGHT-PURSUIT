@@ -59,6 +59,16 @@ public class PoliceChaseAI : MonoBehaviour
         set => target = value;
     }
 
+    /// <summary>Turns this police car into an interceptor (used by PoliceSpawner for the extra cars).</summary>
+    public void MakeInterceptor(float topSpeed, float accel)
+    {
+        maxSpeed = topSpeed;
+        catchUpBoost = 1.05f; // already fast enough
+        if (car == null) car = GetComponent<SimpleCarController>();
+        car.SetMaxSpeed(topSpeed);
+        car.SetAcceleration(accel);
+    }
+
     /// <summary>Empties the BUSTING meter of every police car (Repair pickup).</summary>
     public static void ClearAllBustProgress()
     {
@@ -75,6 +85,8 @@ public class PoliceChaseAI : MonoBehaviour
     {
         car = GetComponent<SimpleCarController>();
         car.PlayerControlled = false;
+        // Player now tops out at 180 km/h: police needs ~150 km/h (+ catch-up boost) to stay a threat.
+        maxSpeed = Mathf.Max(maxSpeed, 42f);
         car.SetMaxSpeed(maxSpeed);
         IsBusted = false;
     }

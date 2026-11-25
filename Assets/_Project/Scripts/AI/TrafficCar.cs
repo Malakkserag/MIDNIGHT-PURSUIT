@@ -10,7 +10,7 @@ using UnityEngine.AI;
 [RequireComponent(typeof(SimpleCarController))]
 public class TrafficCar : MonoBehaviour
 {
-    [SerializeField] private float cruiseSpeed = 11f;  // ~40 km/h
+    [SerializeField] private float cruiseSpeed = 28f;  // ~100 km/h
     [SerializeField] private float steerRate = 2.5f;
 
     private SimpleCarController car;
@@ -19,6 +19,7 @@ public class TrafficCar : MonoBehaviour
     private float stuckTimer;
     private float reverseTimer;
     private float nextRepath;
+    private int stuckCount;
 
     private void Awake()
     {
@@ -39,21 +40,32 @@ public class TrafficCar : MonoBehaviour
         if (!hasDestination || ReachedEnd()) PickDestination();
         else if (path.corners.Length < 2 || Time.time >= nextRepath) Repath();
 
-        Vector3 aim = PointAlongPath(Mathf.Clamp(6f + Mathf.Abs(car.ForwardSpeed) * 0.6f, 6f, 18f));
+        Vector3 aim = PointAlongPath(Mathf.Clamp(8f + Mathf.Abs(car.ForwardSpeed) * 0.7f, 8f, 30f));
         Vector3 to = aim - transform.position;
         to.y = 0f;
         float angle = Vector3.SignedAngle(transform.forward, to, Vector3.up);
         smoothSteer = Mathf.MoveTowards(smoothSteer, Mathf.Clamp(angle / 40f, -1f, 1f), steerRate * Time.fixedDeltaTime);
 
-        // Corner speed + brake for obstacles ahead.
+        // Corner speed + brake only for CARS ahead (walls are handled by following the road path;
+        // braking for walls/kerbs is what left traffic frozen in the middle of the road).
         float sharp = Mathf.InverseLerp(10f, 70f, Mathf.Abs(angle));
-        float safe = Mathf.Lerp(cruiseSpeed, 5f, sharp);
+        float safe = Mathf.Lerp(cruiseSpeed, 8f, sharp);
         float ahead = ObstacleAhead();
         safe = Mathf.Min(safe, Mathf.Lerp(cruiseSpeed, 0f, ahead));
 
+        // Stuck = barely moving for 2 s, for ANY reason (blocked by a car, wedged on a kerb...):
+        // back up while turning, pick a brand new destination. Stuck a long time out of view: respawn.
         float speed = car.ForwardSpeed;
-        if (Mathf.Abs(speed) < 0.7f && ahead < 0.5f) stuckTimer += Time.fixedDeltaTime; else stuckTimer = 0f;
-        if (stuckTimer > 2.5f) { reverseTimer = 1.2f; stuckTimer = 0f; nextRepath = 0f; }
+        if (Mathf.Abs(speed) < 1f && reverseTimer <= 0f) stuckTimer += Time.fixedDeltaTime; else stuckTimer = 0f;
+        if (stuckTimer > 2f)
+        {
+            reverseTimer = 1.3f;
+            stuckTimer = 0f;
+            hasDestination = false;
+            stuckCount++;
+        }
+        if (Mathf.Abs(speed) > 5f) stuckCount = 0;
+        if (stuckCount >= 3) { Destroy(gameObject); return; } // TrafficManager spawns a fresh one elsewhere
 
         if (reverseTimer > 0f)
         {
@@ -62,11 +74,11 @@ public class TrafficCar : MonoBehaviour
         }
         else if (ahead > 0.85f)
         {
-            car.SetInput(0f, smoothSteer, true); // something right in front: stop
+            car.SetInput(0f, smoothSteer, true); // car right in front: stop
         }
         else
         {
-            float throttle = speed < safe ? 0.8f : (speed > safe + 3f ? -0.5f : 0.1f);
+            float throttle = speed < safe ? 1f : (speed > safe + 4f ? -0.6f : 0.15f);
             car.SetInput(throttle, smoothSteer, false);
         }
     }
@@ -105,7 +117,7 @@ public class TrafficCar : MonoBehaviour
     /// <summary>0 = clear road, 1 = obstacle touching our bumper. Looks further at higher speed.</summary>
     private float ObstacleAhead()
     {
-        float length = 5f + Mathf.Max(car.ForwardSpeed, 0f) * 0.9f;
+        float length = 5f + Mathf.Max(car.ForwardSpeed, 0f) * 0.6f;
         Vector3 origin = transform.position + Vector3.up * 0.7f + transform.forward * 2.2f;
         float worst = 0f;
         foreach (float yaw in new[] { 0f, -12f, 12f })
@@ -113,7 +125,8 @@ public class TrafficCar : MonoBehaviour
             Vector3 dir = Quaternion.Euler(0f, yaw, 0f) * transform.forward;
             foreach (RaycastHit h in Physics.RaycastAll(origin, dir, length))
             {
-                if (h.collider.isTrigger || h.collider.transform.IsChildOf(transform) || h.normal.y > 0.7f) continue;
+                if (h.collider.isTrigger || h.collider.transform.IsChildOf(transform)) continue;
+                if (h.rigidbody == null) continue; // only other cars count
                 worst = Mathf.Max(worst, 1f - h.distance / length);
             }
         }

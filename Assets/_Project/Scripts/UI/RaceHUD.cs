@@ -83,6 +83,7 @@ public class RaceHUD : MonoBehaviour
         if (GetComponent<AudioManager>() == null) gameObject.AddComponent<AudioManager>();
         if (GetComponent<PickupSpawner>() == null) gameObject.AddComponent<PickupSpawner>();
         if (GetComponent<TrafficManager>() == null) gameObject.AddComponent<TrafficManager>();
+        if (GetComponent<PoliceSpawner>() == null) gameObject.AddComponent<PoliceSpawner>();
         menu = GetComponent<MainMenu>();
         if (menu == null) menu = gameObject.AddComponent<MainMenu>();
     }

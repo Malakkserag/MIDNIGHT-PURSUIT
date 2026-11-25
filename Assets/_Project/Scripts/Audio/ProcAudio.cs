@@ -9,15 +9,23 @@ public static class ProcAudio
     private const int Rate = 44100;
     private static AudioClip engine, siren, crash, pickup, click, nitro;
 
-    /// <summary>Looping engine hum. Pitch it up with speed.</summary>
-    public static AudioClip Engine => engine != null ? engine : engine = Make("Engine", 1f, (t, i) =>
+    /// <summary>
+    /// Looping engine: a smooth, clean tone (no buzzing pulses) — a fundamental with a few soft
+    /// harmonics, a very gentle slow "breathing" so it sounds alive, and a whisper of filtered air.
+    /// Pitch it up with speed. All frequencies are whole cycles per second → seamless 1 s loop.
+    /// </summary>
+    public static AudioClip Engine => engine != null ? engine : engine = MakeFiltered("Engine", 1f, t =>
     {
-        // Every frequency here is a whole number of cycles per second → the 1 s clip loops seamlessly.
-        float f = 56f;
-        float saw = Saw(t * f) * 0.5f + Saw(t * f * 2f) * 0.25f + Mathf.Sin(t * f * 0.5f * Mathf.PI * 2f) * 0.35f;
-        float rumble = Mathf.Sin(t * 27f * Mathf.PI * 2f) * 0.5f + 0.5f; // pulsing like cylinders
-        return Soft(saw * (0.6f + 0.4f * rumble) * 0.45f);
-    });
+        const float f = 60f;
+        float w = t * f * Mathf.PI * 2f;
+        float tone = Mathf.Sin(w) * 0.55f          // body
+                   + Mathf.Sin(2f * w) * 0.28f     // warmth
+                   + Mathf.Sin(3f * w) * 0.12f     // a touch of growl
+                   + Mathf.Sin(0.5f * w) * 0.25f;  // low sub (30 Hz)
+        float breathe = 0.9f + 0.1f * Mathf.Sin(t * 4f * Mathf.PI * 2f); // slow, subtle (4 Hz)
+        float air = (Random.value * 2f - 1f) * 0.04f;
+        return (tone * breathe + air) * 0.45f;
+    }, 0.5f);
 
     /// <summary>
     /// Police "WAIL" (used when the police is far): a slow climb to a high pitch, then a long

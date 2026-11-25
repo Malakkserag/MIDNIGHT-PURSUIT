@@ -26,6 +26,7 @@ public class CarAudio : MonoBehaviour
         isPolice = GetComponent<PoliceChaseAI>() != null;
 
         engine = NewSource(ProcAudio.Engine, true);
+        if (!isPlayer) engine.maxDistance = isPolice ? 60f : 35f; // only hear other engines up close
         engine.Play();
         if (isPolice)
         {
@@ -53,16 +54,23 @@ public class CarAudio : MonoBehaviour
         s.rolloffMode = AudioRolloffMode.Linear;
         s.minDistance = 5f;
         s.maxDistance = 80f;
-        s.dopplerLevel = 0.3f;
+        s.dopplerLevel = 0f; // doppler at 200+ km/h made engines warble/vibrate
         return s;
     }
 
     private void Update()
     {
         if (engine == null) return;
-        float speed01 = Mathf.Clamp01(Mathf.Abs(car.ForwardSpeed) / 35f);
-        engine.pitch = Mathf.Lerp(0.55f, 2.1f, speed01) * (car.Boosting ? 1.15f : 1f);
-        float baseVol = isPlayer ? 0.55f : (isPolice ? 0.5f : 0.35f);
+        // Speed → engine pitch, with a fake gearbox: the pitch climbs through each "gear" then drops a bit.
+        float speed = Mathf.Abs(car.ForwardSpeed);
+        float speed01 = Mathf.Clamp01(speed / 55f);
+        const float gearSize = 14f; // m/s per gear (~50 km/h)
+        float inGear = (speed % gearSize) / gearSize;
+        int gear = Mathf.Min((int)(speed / gearSize), 4);
+        float pitch = 0.7f + gear * 0.18f + inGear * 0.55f;
+        engine.pitch = Mathf.Lerp(engine.pitch, pitch * (car.Boosting ? 1.12f : 1f), Time.deltaTime * 8f);
+        // Other cars are quiet so a dozen engines don't stack into a droning buzz.
+        float baseVol = isPlayer ? 0.5f : (isPolice ? 0.25f : 0.12f);
         engine.volume = GameSettings.Engine * baseVol * Mathf.Lerp(0.5f, 1f, speed01);
 
         if (siren != null)

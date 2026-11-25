@@ -83,6 +83,24 @@ public class SimpleCarController : MonoBehaviour
     }
 
     public void SetMaxSpeed(float value) => maxSpeed = value;
+    public void SetAcceleration(float value) => acceleration = value;
+
+    [Header("Player speed")]
+    [Tooltip("Player top speed in m/s (50 = 180 km/h). Nitro multiplies it by Nitro Multiplier.")]
+    [SerializeField] private float playerTopSpeed = 50f;
+    [Tooltip("Nitro top speed = top speed x this (1.45 → ~260 km/h).")]
+    [SerializeField] private float nitroMultiplier = 1.45f;
+    [SerializeField] private float playerAcceleration = 32f;
+
+    private void Start()
+    {
+        // The scene still has the old prototype values saved on the player car; use the new ones.
+        if (playerControlled && GetComponent<PoliceChaseAI>() == null)
+        {
+            maxSpeed = playerTopSpeed;
+            acceleration = playerAcceleration;
+        }
+    }
 
     // ---------- Nitro (from pickups) ----------
     private float boostTimer;
@@ -112,7 +130,7 @@ public class SimpleCarController : MonoBehaviour
 
             // Throttle (nitro: +50% top speed, double acceleration, pushes even without W pressed)
             if (boostTimer > 0f) boostTimer -= Time.fixedDeltaTime;
-            float topSpeed = Boosting ? maxSpeed * 1.5f : maxSpeed;
+            float topSpeed = Boosting ? maxSpeed * nitroMultiplier : maxSpeed;
             float accel = Boosting ? acceleration * 2f : acceleration;
             float throttle = Boosting && throttleInput >= 0f ? 1f : throttleInput;
             if (Mathf.Abs(forwardSpeed) < topSpeed || Mathf.Sign(throttle) != Mathf.Sign(forwardSpeed))
@@ -122,6 +140,8 @@ public class SimpleCarController : MonoBehaviour
 
             // Steering (scaled by speed so the car can't spin in place)
             float speedFactor = Mathf.Clamp01(Mathf.Abs(forwardSpeed) / 5f);
+            // Gentler steering at very high speed so 200+ km/h stays controllable.
+            speedFactor *= Mathf.Lerp(1f, 0.45f, Mathf.InverseLerp(30f, 70f, Mathf.Abs(forwardSpeed)));
             float turn = steerInput * turnSpeed * speedFactor * Mathf.Sign(forwardSpeed) * Time.fixedDeltaTime;
             rb.MoveRotation(rb.rotation * Quaternion.Euler(0f, turn, 0f));
 
