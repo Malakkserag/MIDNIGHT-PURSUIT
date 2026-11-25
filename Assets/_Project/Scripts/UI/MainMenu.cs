@@ -148,7 +148,7 @@ public class MainMenu : MonoBehaviour
                 "<b>R</b>   restart\n" +
                 "<b>ESC</b>   pause / back\n\n" +
                 "The police are hunting you. Every time they ram you the <b>BUSTING</b> bar fills up. " +
-                "When it's full, it's game over.\n\nUse the radar (bottom-left) to see where they're coming from " +
+                "When it's full, it's game over.\n\nUse the radar (top-left) to see where they're coming from " +
                 "and escape for as long as you can!",
                 howToBody);
             if (GUI.Button(new Rect(bx, Screen.height - 150 * s, bw, bh), "BACK", primaryBtn)) showPauseHowTo = false;

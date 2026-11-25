@@ -110,6 +110,53 @@ public class RaceHUD : MonoBehaviour
 #endif
     }
 
+    // ---------- Escape timer headline (top-centre) ----------
+    private GUIStyle timerCaption, timerValue;
+
+    /// <summary>Draws "ESCAPE TIME" + big neon timer at the top centre. Returns its bottom y.</summary>
+    private float DrawEscapeTimer()
+    {
+        float s = Mathf.Clamp(Screen.height / 1080f, 0.6f, 2f);
+        if (timerValue == null)
+        {
+            // Impact / Arial Black ship with Windows; falls back to Unity's default font elsewhere.
+            Font headline = Font.CreateDynamicFontFromOSFont(new[] { "Impact", "Arial Black", "Arial" }, 64);
+            timerCaption = new GUIStyle(GUI.skin.label) { font = headline, alignment = TextAnchor.MiddleCenter, clipping = TextClipping.Overflow };
+            timerValue = new GUIStyle(timerCaption);
+        }
+        timerCaption.fontSize = Mathf.RoundToInt(22 * s);
+        timerValue.fontSize = Mathf.RoundToInt(64 * s);
+
+        float w = 600 * s, cx = Screen.width / 2f, y = 14 * s;
+        Rect cap = new Rect(cx - w / 2, y, w, 28 * s);
+        Rect val = new Rect(cx - w / 2, cap.yMax - 4 * s, w, 72 * s);
+
+        // Turn red and pulse while the police are busting you.
+        bool danger = false;
+        foreach (PoliceChaseAI p in FindObjectsByType<PoliceChaseAI>(FindObjectsSortMode.None))
+            if (p.BustProgress > 0.01f) { danger = true; break; }
+        Color main = danger ? Color.Lerp(new Color(1f, 0.25f, 0.2f), Color.white, Mathf.PingPong(Time.time * 4f, 1f))
+                            : new Color(0.25f, 0.9f, 1f); // neon cyan
+
+        Outlined(cap, "ESCAPE TIME", timerCaption, new Color(1f, 0.82f, 0.05f), 2f * s); // yellow caption
+        int mins = (int)(escapeTime / 60f);
+        string text = mins > 0 ? $"{mins}:{escapeTime % 60f:00.0}" : $"{escapeTime:0.0}s";
+        Outlined(val, text, timerValue, main, 3f * s);
+        return val.yMax;
+    }
+
+    private static void Outlined(Rect r, string text, GUIStyle style, Color color, float thick)
+    {
+        Color keep = style.normal.textColor;
+        style.normal.textColor = new Color(0f, 0f, 0f, 0.85f);
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+                if (dx != 0 || dy != 0) GUI.Label(new Rect(r.x + dx * thick, r.y + dy * thick, r.width, r.height), text, style);
+        style.normal.textColor = color;
+        GUI.Label(r, text, style);
+        style.normal.textColor = keep;
+    }
+
     private void OnGUI()
     {
         if (speedStyle == null)
@@ -127,15 +174,15 @@ public class RaceHUD : MonoBehaviour
 
         float kmh = playerCar != null ? Mathf.Abs(playerCar.ForwardSpeed) * 3.6f : 0f;
         GUI.Label(new Rect(Screen.width - 320, Screen.height - 90, 300, 70), $"{kmh:0} km/h", speedStyle);
-        GUI.Label(new Rect(20, 20, 500, 40), $"Escape time: {escapeTime:0.0}s", labelStyle);
+        float timerBottom = DrawEscapeTimer();
 
-        // Bust meter: fills while the police is touching you.
+        // Bust meter: fills while the police is touching you. Centred under the timer.
         float bust = 0f;
         foreach (PoliceChaseAI p in FindObjectsByType<PoliceChaseAI>(FindObjectsSortMode.None))
             bust = Mathf.Max(bust, p.BustProgress);
         if (bust > 0.01f && !PoliceChaseAI.IsBusted)
         {
-            Rect bar = new Rect(20, 58, 260, 14);
+            Rect bar = new Rect(Screen.width / 2f - 130, timerBottom + 6, 260, 14);
             GUI.color = new Color(0f, 0f, 0f, 0.6f);
             GUI.DrawTexture(bar, Texture2D.whiteTexture);
             GUI.color = Color.Lerp(new Color(1f, 0.6f, 0f), Color.red, bust);
