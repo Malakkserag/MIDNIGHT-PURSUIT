@@ -41,6 +41,13 @@ public class SimpleCarController : MonoBehaviour
             ? box.center - new Vector3(0f, box.size.y * 0.45f, 0f)
             : new Vector3(0f, -0.5f, 0f);
         rb.interpolation = RigidbodyInterpolation.Interpolate; // smooth camera follow
+        // BUG FIX (cars passing through buildings): at 30+ m/s a car moves ~0.6 m per physics step,
+        // more than a thin wall collider, so discrete collision checks missed walls. Continuous
+        // detection sweeps the body between steps.
+        rb.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        // BUG FIX (endless spinning / flips): collision spin was never slowed down.
+        rb.angularDamping = 2f;
+        rb.maxAngularVelocity = 6f;
 
         // The body is a box sliding on the road: with normal friction (made worse by downforce)
         // it acted like a brake and capped the speed around 53 km/h. This script handles grip
@@ -114,6 +121,15 @@ public class SimpleCarController : MonoBehaviour
 
             // Downforce: faster = pressed harder onto the road, so kerbs don't launch the car.
             rb.AddForce(-transform.up * Mathf.Abs(forwardSpeed) * downforce, ForceMode.Acceleration);
+
+            // BUG FIX (cars spinning like tops after a hit): steering is done with MoveRotation, so any
+            // physics yaw spin on the ground comes from collisions. Tyres would stop that quickly — kill
+            // most of it each step, and damp roll/pitch wobble so bumps don't tip the car over.
+            Vector3 localAv = transform.InverseTransformDirection(rb.angularVelocity);
+            localAv.y *= handbrake ? 0.9f : 0.75f;
+            localAv.x *= 0.8f;
+            localAv.z *= 0.8f;
+            rb.angularVelocity = transform.TransformDirection(localAv);
         }
 
         // Slowdown. The body has no friction, so without this the car would drift/roll forever
@@ -139,7 +155,8 @@ public class SimpleCarController : MonoBehaviour
     {
         foreach (ContactPoint c in collision.contacts)
         {
-            if (Vector3.Dot(c.normal, transform.up) > 0.5f) { groundContact = true; return; }
+            // Only static ground counts: standing on top of another car is not "on the road".
+            if (collision.rigidbody == null && Vector3.Dot(c.normal, transform.up) > 0.5f) { groundContact = true; return; }
         }
     }
 
@@ -161,7 +178,7 @@ public class SimpleCarController : MonoBehaviour
         Vector3 origin = transform.TransformPoint(box != null ? box.center : Vector3.zero);
         foreach (RaycastHit hit in Physics.RaycastAll(origin, -transform.up, halfHeight + 0.6f))
         {
-            if (hit.rigidbody == rb) continue;
+            if (hit.rigidbody == rb || hit.collider.isTrigger) continue;
             return true;
         }
         return false;

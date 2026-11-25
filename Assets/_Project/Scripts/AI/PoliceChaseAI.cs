@@ -117,6 +117,9 @@ public class PoliceChaseAI : MonoBehaviour
         smoothSteer = Mathf.MoveTowards(smoothSteer, targetSteer, steerRate * Time.fixedDeltaTime);
         float steer = smoothSteer;
 
+        // BUG FIX (police driving into buildings): "whiskers" look ahead for walls and steer away.
+        float wallBrake = AvoidWalls(ref steer);
+
         // Catch-up: the further behind, the faster (up to catchUpBoost x normal top speed).
         float boost = Mathf.Lerp(1f, catchUpBoost, Mathf.InverseLerp(40f, 150f, distance));
         car.SetMaxSpeed(maxSpeed * boost);
@@ -164,7 +167,8 @@ public class PoliceChaseAI : MonoBehaviour
         Vector3 toPlayer = target.position - transform.position;
         toPlayer.y = 0f;
         float playerAngle = Vector3.SignedAngle(transform.forward, toPlayer, Vector3.up);
-        bool playerBehind = distance < 30f && Mathf.Abs(playerAngle) > 100f && HasLineOfSight();
+        turnAroundCooldown -= Time.fixedDeltaTime;
+        bool playerBehind = distance < 30f && Mathf.Abs(playerAngle) > 100f && turnAroundCooldown <= 0f && HasLineOfSight();
 
         if (turningAround)
         {
@@ -172,7 +176,13 @@ public class PoliceChaseAI : MonoBehaviour
             car.SetInput(-1f, -Mathf.Sign(playerAngle), false);
             turnAroundTimer -= Time.fixedDeltaTime;
             Status = "Turning around";
-            if (Mathf.Abs(playerAngle) < 50f || turnAroundTimer <= 0f) turningAround = false;
+            // BUG FIX (police wiggling back and forth forever): stop when facing the player, when time
+            // is up, or when backing into something — then wait before trying another turn-around.
+            if (Mathf.Abs(playerAngle) < 50f || turnAroundTimer <= 0f || BlockedBehind())
+            {
+                turningAround = false;
+                turnAroundCooldown = 3f;
+            }
         }
         else if (playerBehind && !nearTarget)
         {
@@ -208,6 +218,7 @@ public class PoliceChaseAI : MonoBehaviour
             float nearness = Mathf.InverseLerp(40f, 8f, cornerDist);
             float safeSpeed = Mathf.Lerp(maxSpeed * boost, 9f, sharpness * Mathf.Max(nearness, sharpness > 0.8f ? 1f : 0f));
             float speed = car.ForwardSpeed;
+            safeSpeed = Mathf.Min(safeSpeed, Mathf.Lerp(maxSpeed * boost, 6f, wallBrake));
             float throttle = speed < safeSpeed ? 1f : (speed > safeSpeed + 4f ? -0.6f : 0.2f);
             car.SetInput(throttle, steer, false);
             Status = distance < directChaseDistance ? "Ramming player"
@@ -251,7 +262,51 @@ public class PoliceChaseAI : MonoBehaviour
         return true;
     }
 
-    private bool HasPath => path != null && path.corners.Length >= 2;
+    private float turnAroundCooldown;
+
+    /// <summary>
+    /// Three short ray "whiskers" (centre, left, right) in front of the car. A wall ahead nudges the
+    /// steering away from it. Returns 0..1: how hard to slow down (1 = wall right in front).
+    /// The player car and the ground are ignored.
+    /// </summary>
+    private float AvoidWalls(ref float steer)
+    {
+        float speed = Mathf.Max(car.ForwardSpeed, 0f);
+        if (speed < 2f) return 0f;
+        float length = Mathf.Clamp(6f + speed * 0.7f, 6f, 25f);
+        Vector3 origin = transform.position + Vector3.up * 0.7f + transform.forward * 2f;
+
+        float centre = WhiskerHit(origin, transform.forward, length);
+        float left = WhiskerHit(origin, Quaternion.Euler(0f, -30f, 0f) * transform.forward, length * 0.7f);
+        float right = WhiskerHit(origin, Quaternion.Euler(0f, 30f, 0f) * transform.forward, length * 0.7f);
+
+        // Closer hit on one side → steer to the other side.
+        float push = right - left;
+        if (centre > 0f && Mathf.Abs(push) < 0.1f) push = steer >= 0f ? 1f : -1f; // dead ahead: keep turning the way we were
+        steer = Mathf.Clamp(steer - push * 0.8f * Mathf.Max(centre, Mathf.Max(left, right)), -1f, 1f);
+        return centre;
+    }
+
+    /// <summary>0 = nothing within length, 1 = obstacle right at the origin.</summary>
+    private float WhiskerHit(Vector3 origin, Vector3 dir, float length)
+    {
+        foreach (RaycastHit h in Physics.RaycastAll(origin, dir, length))
+        {
+            if (h.collider.isTrigger || h.collider.transform.IsChildOf(transform)) continue;
+            if (target != null && h.collider.transform.IsChildOf(target)) continue; // ramming the player is fine
+            if (h.normal.y > 0.7f) continue; // road / ramp surface, not a wall
+            return 1f - h.distance / length;
+        }
+        return 0f;
+    }
+
+    private bool BlockedBehind()
+    {
+        Vector3 origin = transform.position + Vector3.up * 0.7f - transform.forward * 2f;
+        return WhiskerHit(origin, -transform.forward, 2.5f) > 0f;
+    }
+
+    private bool HasPath =>path != null && path.corners.Length >= 2;
 
     private bool TryRespawnBehindTarget()
     {
