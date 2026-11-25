@@ -1,79 +1,99 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
 /// <summary>
-/// Adds extra police "interceptors" during a run: copies of the scene's police car with a much
-/// higher top speed (default 80 m/s ≈ 288 km/h). They join the chase one after another, appearing
-/// on the road behind the player, out of sight.
+/// - Adds extra police "interceptors" (copies of the scene's police car with a much higher top speed,
+///   default 80 m/s ≈ 288 km/h). They are placed right beside the original police car when the game
+///   starts, so all police cars set off together from the same direction.
+/// - Shows "POLICE IS COMING!!" every time a police car closes in on the player.
 /// RaceHUD adds this component automatically.
 /// </summary>
 public class PoliceSpawner : MonoBehaviour
 {
     [SerializeField] private int extraPolice = 2;
-    [Tooltip("Escape-time seconds at which each extra police car joins.")]
-    [SerializeField] private float[] joinTimes = { 15f, 35f };
     [Tooltip("Interceptor top speed in m/s (80 = 288 km/h).")]
     [SerializeField] private float interceptorSpeed = 80f;
     [SerializeField] private float interceptorAcceleration = 40f;
+    [Tooltip("Sideways gap between police cars in the starting formation (m).")]
+    [SerializeField] private float formationSpacing = 4.5f;
 
-    private int spawned;
-    private float playTime;
-    private float nextTry;
+    [Header("Warning")]
+    [Tooltip("Show the warning when a police car gets closer than this (m).")]
+    [SerializeField] private float warnDistance = 45f;
+    [Tooltip("The warning can show again once every police car is further than this (m).")]
+    [SerializeField] private float rearmDistance = 80f;
+
+    private bool spawned;
+    private bool warningArmed = true;
+    private float lastWarning = -99f;
+
+    private void Start()
+    {
+        // Spawn immediately (still in the menu, cars are held still), so everyone starts together.
+        TrySpawnFormation();
+    }
 
     private void Update()
     {
-        if (!GameState.IsPlaying || spawned >= extraPolice) return;
-        playTime += Time.deltaTime;
-        float joinAt = spawned < joinTimes.Length ? joinTimes[spawned] : joinTimes[joinTimes.Length - 1] + 20f * spawned;
-        if (playTime < joinAt || Time.time < nextTry) return;
-        nextTry = Time.time + 0.5f;
-
-        PoliceChaseAI original = FindAnyObjectByType<PoliceChaseAI>();
-        if (original == null || original.Target == null) return;
-        if (!FindSpotBehind(original.Target, out Vector3 pos, out Quaternion rot)) return;
-
-        // Lift by the collider's half height so it sits on the road.
-        BoxCollider box = original.GetComponent<BoxCollider>();
-        float lift = box != null ? box.size.y * 0.5f - box.center.y + 0.2f : 1f;
-        GameObject clone = Instantiate(original.gameObject, pos + Vector3.up * lift, rot);
-        clone.name = "PoliceInterceptor_" + (spawned + 1);
-
-        // Runtime-added audio was copied too: remove it, AudioManager gives the clone fresh audio.
-        foreach (CarAudio a in clone.GetComponents<CarAudio>()) DestroyImmediate(a);
-        foreach (AudioSource s in clone.GetComponents<AudioSource>()) DestroyImmediate(s);
-
-        clone.GetComponent<PoliceChaseAI>().MakeInterceptor(interceptorSpeed, interceptorAcceleration);
-        spawned++;
-        PickupSpawner.ShowToast("POLICE BACKUP INCOMING!", new Color(1f, 0.25f, 0.2f));
+        if (!spawned) TrySpawnFormation();
+        if (GameState.IsPlaying) UpdateWarning();
     }
 
-    private static bool FindSpotBehind(Transform player, out Vector3 pos, out Quaternion rot)
+    private void TrySpawnFormation()
     {
-        pos = default;
-        rot = Quaternion.identity;
-        foreach (float back in new[] { 90f, 70f, 120f, 55f })
+        PoliceChaseAI original = FindAnyObjectByType<PoliceChaseAI>();
+        if (original == null) return;
+        spawned = true;
+
+        Transform t = original.transform;
+        // Slots: right, left, then further back right/left if more are added.
+        var slots = new List<Vector3>();
+        for (int i = 0; i < extraPolice; i++)
         {
-            Vector3 guess = player.position - player.forward * back;
-            if (!NavMesh.SamplePosition(guess, out NavMeshHit hit, 20f, NavMesh.AllAreas)) continue;
-            if (Mathf.Abs(hit.position.y - player.position.y) > 3f) continue;
-
-            Camera cam = Camera.main;
-            if (cam != null)
-            {
-                Vector3 vp = cam.WorldToViewportPoint(hit.position);
-                if (vp.z > 0f && vp.x > -0.1f && vp.x < 1.1f && vp.y > -0.1f && vp.y < 1.1f) continue;
-            }
-            bool blocked = false;
-            foreach (Collider c in Physics.OverlapSphere(hit.position + Vector3.up, 4f))
-                if (!c.isTrigger && c.attachedRigidbody != null) { blocked = true; break; }
-            if (blocked) continue;
-
-            Vector3 face = player.position - hit.position;
-            face.y = 0f;
-            pos = hit.position;
-            rot = Quaternion.LookRotation(face.sqrMagnitude > 0.01f ? face : player.forward, Vector3.up);
-            return true;
+            float side = i % 2 == 0 ? 1f : -1f;
+            int row = i / 2;
+            slots.Add(t.position + t.right * side * formationSpacing * (row + 1) - t.forward * row * 6f);
         }
-        return false;
+
+        int n = 0;
+        foreach (Vector3 slot in slots)
+        {
+            Vector3 pos = slot;
+            // Keep it on the road (NavMesh); if the side is blocked, line up behind instead.
+            if (!NavMesh.SamplePosition(slot, out NavMeshHit hit, 3f, NavMesh.AllAreas))
+            {
+                Vector3 behind = t.position - t.forward * 7f * (n + 1);
+                if (NavMesh.SamplePosition(behind, out hit, 4f, NavMesh.AllAreas)) pos = hit.position;
+            }
+            else pos = hit.position;
+            pos.y = t.position.y; // same height as the original (already sitting on the road)
+
+            GameObject clone = Instantiate(original.gameObject, pos, t.rotation);
+            clone.name = "PoliceInterceptor_" + (++n);
+            // Runtime-added audio may have been copied too: remove it, AudioManager adds fresh audio.
+            foreach (CarAudio a in clone.GetComponents<CarAudio>()) DestroyImmediate(a);
+            foreach (AudioSource s in clone.GetComponents<AudioSource>()) DestroyImmediate(s);
+            clone.GetComponent<PoliceChaseAI>().MakeInterceptor(interceptorSpeed, interceptorAcceleration);
+        }
+    }
+
+    private void UpdateWarning()
+    {
+        float nearest = float.MaxValue;
+        foreach (PoliceChaseAI p in FindObjectsByType<PoliceChaseAI>(FindObjectsSortMode.None))
+        {
+            if (p.Target == null) continue;
+            nearest = Mathf.Min(nearest, Vector3.Distance(p.transform.position, p.Target.position));
+        }
+        if (nearest == float.MaxValue) return;
+
+        if (nearest > rearmDistance) warningArmed = true;
+        if (warningArmed && nearest < warnDistance && Time.time - lastWarning > 6f)
+        {
+            warningArmed = false;
+            lastWarning = Time.time;
+            PickupSpawner.ShowToast("POLICE IS COMING!!", new Color(1f, 0.2f, 0.15f));
+        }
     }
 }

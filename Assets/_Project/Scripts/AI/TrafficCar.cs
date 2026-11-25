@@ -11,7 +11,18 @@ using UnityEngine.AI;
 public class TrafficCar : MonoBehaviour
 {
     [SerializeField] private float cruiseSpeed = 28f;  // ~100 km/h
-    [SerializeField] private float steerRate = 2.5f;
+    [SerializeField] private float steerRate = 1.6f;
+    [Tooltip("How far right of the route's centre line to drive (m). ~half a lane width + a bit.")]
+    [SerializeField] private float laneOffset = 3f;
+
+    /// <summary>Moves from 'from' toward 'to' but stops at the road edge (NavMesh boundary).</summary>
+    private static Vector3 KeepOnRoad(Vector3 from, Vector3 to)
+    {
+        if (!NavMesh.SamplePosition(from, out NavMeshHit start, 3f, NavMesh.AllAreas)) return from;
+        if (NavMesh.Raycast(start.position, to, out NavMeshHit edge, NavMesh.AllAreas))
+            return Vector3.Lerp(start.position, edge.position, 0.7f); // stay a little inside the edge
+        return to;
+    }
 
     private SimpleCarController car;
     private NavMeshPath path;
@@ -40,11 +51,22 @@ public class TrafficCar : MonoBehaviour
         if (!hasDestination || ReachedEnd()) PickDestination();
         else if (path.corners.Length < 2 || Time.time >= nextRepath) Repath();
 
-        Vector3 aim = PointAlongPath(Mathf.Clamp(8f + Mathf.Abs(car.ForwardSpeed) * 0.7f, 8f, 30f));
+        float look = Mathf.Clamp(10f + Mathf.Abs(car.ForwardSpeed) * 0.9f, 10f, 35f);
+        Vector3 aim = PointAlongPath(look);
+        // Drive in the RIGHT-HAND LANE: the NavMesh route hugs the middle / inside of the road, so shift
+        // the aim point sideways to the right of the route direction (but never off the road).
+        Vector3 routeDir = PointAlongPath(look + 3f) - aim;
+        routeDir.y = 0f;
+        if (routeDir.sqrMagnitude < 0.01f) routeDir = transform.forward;
+        aim = KeepOnRoad(aim, aim + Vector3.Cross(Vector3.up, routeDir.normalized) * laneOffset);
+
         Vector3 to = aim - transform.position;
         to.y = 0f;
         float angle = Vector3.SignedAngle(transform.forward, to, Vector3.up);
-        smoothSteer = Mathf.MoveTowards(smoothSteer, Mathf.Clamp(angle / 40f, -1f, 1f), steerRate * Time.fixedDeltaTime);
+        // Gentle, damped steering: small corrections on straights, so no swinging left and right.
+        float wanted = Mathf.Clamp(angle / 55f, -1f, 1f);
+        if (Mathf.Abs(angle) < 2f) wanted = 0f; // dead zone: go straight
+        smoothSteer = Mathf.MoveTowards(smoothSteer, wanted, steerRate * Time.fixedDeltaTime);
 
         // Corner speed + brake only for CARS ahead (walls are handled by following the road path;
         // braking for walls/kerbs is what left traffic frozen in the middle of the road).
