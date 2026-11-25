@@ -84,6 +84,13 @@ public class SimpleCarController : MonoBehaviour
 
     public void SetMaxSpeed(float value) => maxSpeed = value;
 
+    // ---------- Nitro (from pickups) ----------
+    private float boostTimer;
+    /// <summary>True while a nitro boost is active.</summary>
+    public bool Boosting => boostTimer > 0f;
+    /// <summary>Higher top speed and much stronger acceleration for a few seconds.</summary>
+    public void Boost(float seconds) => boostTimer = Mathf.Max(boostTimer, seconds);
+
     private void Update()
     {
         if (!playerControlled) return;
@@ -103,10 +110,14 @@ public class SimpleCarController : MonoBehaviour
             Vector3 velocity = rb.linearVelocity;
             float forwardSpeed = Vector3.Dot(velocity, transform.forward);
 
-            // Throttle
-            if (Mathf.Abs(forwardSpeed) < maxSpeed || Mathf.Sign(throttleInput) != Mathf.Sign(forwardSpeed))
+            // Throttle (nitro: +50% top speed, double acceleration, pushes even without W pressed)
+            if (boostTimer > 0f) boostTimer -= Time.fixedDeltaTime;
+            float topSpeed = Boosting ? maxSpeed * 1.5f : maxSpeed;
+            float accel = Boosting ? acceleration * 2f : acceleration;
+            float throttle = Boosting && throttleInput >= 0f ? 1f : throttleInput;
+            if (Mathf.Abs(forwardSpeed) < topSpeed || Mathf.Sign(throttle) != Mathf.Sign(forwardSpeed))
             {
-                rb.AddForce(transform.forward * throttleInput * acceleration, ForceMode.Acceleration);
+                rb.AddForce(transform.forward * throttle * accel, ForceMode.Acceleration);
             }
 
             // Steering (scaled by speed so the car can't spin in place)

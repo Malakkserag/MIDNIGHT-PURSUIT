@@ -32,10 +32,10 @@ public class MainMenu : MonoBehaviour
         if (GameState.Current == GameState.State.Playing) GameState.Pause();
         else if (GameState.Current == GameState.State.Paused)
         {
-            if (showPauseHowTo) showPauseHowTo = false; // Esc backs out of How to Play first
+            if (showPauseHowTo || showOptions) { showPauseHowTo = false; showOptions = false; } // Esc backs out first
             else GameState.Resume();
         }
-        else if (GameState.Current == GameState.State.Menu && showHowTo) showHowTo = false;
+        else if (GameState.Current == GameState.State.Menu) { showHowTo = false; showOptions = false; }
     }
 
     private static bool EscapePressed()
@@ -75,14 +75,22 @@ public class MainMenu : MonoBehaviour
             DrawHowTo(cx, y + 160);
             return;
         }
+        if (showOptions)
+        {
+            Rect panel = new Rect(cx - 320, y + 150, 640, Mathf.Min(560, Screen.height - y - 170));
+            Box(panel);
+            DrawOptions(panel, 1f, button);
+            return;
+        }
 
         float by = y + 170;
-        if (GUI.Button(new Rect(cx - 140, by, 280, 60), "PLAY", button)) GameState.StartGame();
-        if (GUI.Button(new Rect(cx - 140, by + 75, 280, 60), "HOW TO PLAY", button)) showHowTo = true;
-        if (GUI.Button(new Rect(cx - 140, by + 150, 280, 60), "QUIT", button)) GameState.Quit();
+        if (Btn(new Rect(cx - 140, by, 280, 60), "PLAY", button)) GameState.StartGame();
+        if (Btn(new Rect(cx - 140, by + 75, 280, 60), "HOW TO PLAY", button)) showHowTo = true;
+        if (Btn(new Rect(cx - 140, by + 150, 280, 60), "OPTIONS", button)) showOptions = true;
+        if (Btn(new Rect(cx - 140, by + 225, 280, 60), "QUIT", button)) GameState.Quit();
 
         float best = GameState.BestEscapeTime;
-        GUI.Label(new Rect(0, by + 230, Screen.width, 30),
+        GUI.Label(new Rect(0, by + 305, Screen.width, 30),
             best > 0f ? $"Best escape: {best:0.0}s" : "No record yet — set one!", subtitle);
     }
 
@@ -100,7 +108,82 @@ public class MainMenu : MonoBehaviour
             "The police are hunting you. Every time they ram you the BUSTING bar fills up. " +
             "When it's full, it's game over. Escape for as long as you can!",
             body);
-        if (GUI.Button(new Rect(cx - 100, panel.yMax - 65, 200, 50), "BACK", button)) showHowTo = false;
+        if (Btn(new Rect(cx - 100, panel.yMax - 65, 200, 50), "BACK", button)) showHowTo = false;
+    }
+
+    // ---------- Options (sound volumes + controls) ----------
+    private bool showOptions;
+    private GUIStyle optLabel, optHeader, optValue;
+
+    /// <summary>Button that also plays the click sound.</summary>
+    private static bool Btn(Rect r, string text, GUIStyle style)
+    {
+        if (!GUI.Button(r, text, style)) return false;
+        AudioManager.PlayUI(ProcAudio.Click, 0.8f);
+        return true;
+    }
+
+    /// <summary>Volume sliders, mute toggle and the controls list, drawn inside 'area'.</summary>
+    private void DrawOptions(Rect area, float s, GUIStyle backStyle)
+    {
+        if (optLabel == null)
+        {
+            optLabel = new GUIStyle(GUI.skin.label) { alignment = TextAnchor.MiddleLeft };
+            optLabel.normal.textColor = Color.white;
+            optHeader = new GUIStyle(optLabel) { fontStyle = FontStyle.BoldAndItalic };
+            optHeader.normal.textColor = new Color(0.25f, 0.85f, 1f);
+            optValue = new GUIStyle(optLabel) { alignment = TextAnchor.MiddleRight };
+        }
+        optLabel.fontSize = optValue.fontSize = Mathf.RoundToInt(19 * s);
+        optHeader.fontSize = Mathf.RoundToInt(22 * s);
+
+        float x = area.x + 30 * s, w = area.width - 60 * s, y = area.y + 20 * s, row = 40 * s;
+
+        GUI.Label(new Rect(x, y, w, row), "SOUND", optHeader); y += row;
+        GameSettings.Master = VolumeRow(ref y, x, w, row, s, "Master volume", GameSettings.Master);
+        GameSettings.Engine = VolumeRow(ref y, x, w, row, s, "Engine", GameSettings.Engine);
+        GameSettings.Effects = VolumeRow(ref y, x, w, row, s, "Effects (crashes, pickups)", GameSettings.Effects);
+        GameSettings.Siren = VolumeRow(ref y, x, w, row, s, "Police siren", GameSettings.Siren);
+        bool muted = GUI.Toggle(new Rect(x, y, w, row), GameSettings.Muted, "  Mute all sound", optLabel);
+        if (muted != GameSettings.Muted) GameSettings.Muted = muted;
+        y += row * 1.3f;
+
+        GUI.Label(new Rect(x, y, w, row), "CONTROLS", optHeader); y += row;
+        string[,] keys =
+        {
+            { "W / ↑", "Accelerate" }, { "S / ↓", "Brake / reverse" }, { "A D / ← →", "Steer" },
+            { "SPACE", "Handbrake drift" }, { "C", "Change camera" }, { "R", "Restart" }, { "ESC", "Pause / back" },
+        };
+        float half = w / 2f, small = row * 0.75f;
+        for (int i = 0; i < keys.GetLength(0); i++)
+        {
+            float cx = x + (i % 2) * half, cy = y + (i / 2) * small;
+            GUI.Label(new Rect(cx, cy, half * 0.38f, small), "<b>" + keys[i, 0] + "</b>", RichLabel);
+            GUI.Label(new Rect(cx + half * 0.38f, cy, half * 0.62f, small), keys[i, 1], optLabel);
+        }
+
+        float bw = Mathf.Min(220 * s, area.width * 0.6f), bh = 54 * s;
+        if (Btn(new Rect(area.center.x - bw / 2, area.yMax - bh - 16 * s, bw, bh), "BACK", backStyle)) showOptions = false;
+    }
+
+    private GUIStyle richLabel;
+    private GUIStyle RichLabel
+    {
+        get
+        {
+            if (richLabel == null) richLabel = new GUIStyle(optLabel) { richText = true };
+            richLabel.fontSize = optLabel.fontSize;
+            return richLabel;
+        }
+    }
+
+    private float VolumeRow(ref float y, float x, float w, float row, float s, string label, float value)
+    {
+        GUI.Label(new Rect(x, y, w * 0.45f, row), label, optLabel);
+        float v = GUI.HorizontalSlider(new Rect(x + w * 0.47f, y + row * 0.4f, w * 0.4f, row * 0.5f), value, 0f, 1f);
+        GUI.Label(new Rect(x + w * 0.88f, y, w * 0.12f, row), $"{Mathf.RoundToInt(v * 100)}%", optValue);
+        y += row;
+        return v;
     }
 
     // ---------- Pause menu: dark side panel on the right, game still visible on the left ----------
@@ -132,10 +215,17 @@ public class MainMenu : MonoBehaviour
 
         float y = Screen.height * 0.10f;
         GUI.Label(new Rect(panel.x, y, panelW, 70 * s), "PAUSE", pauseTitle);
-        GUI.Label(new Rect(panel.x, y + 62 * s, panelW, 45 * s), showPauseHowTo ? "HOW TO PLAY" : "MENU", pauseSub);
+        GUI.Label(new Rect(panel.x, y + 62 * s, panelW, 45 * s),
+            showPauseHowTo ? "HOW TO PLAY" : (showOptions ? "OPTIONS" : "MENU"), pauseSub);
 
-        float bw = Mathf.Min(panelW * 0.72f, 320f * s), bh = 84f * s;
+        float bw = Mathf.Min(panelW * 0.72f, 320f * s), bh = 72f * s;
         float bx = cx - bw / 2f;
+
+        if (showOptions)
+        {
+            DrawOptions(new Rect(panel.x + 10 * s, y + 120 * s, panelW - 20 * s, Screen.height - y - 140 * s), s, primaryBtn);
+            return;
+        }
 
         if (showPauseHowTo)
         {
@@ -148,21 +238,24 @@ public class MainMenu : MonoBehaviour
                 "<b>R</b>   restart\n" +
                 "<b>ESC</b>   pause / back\n\n" +
                 "The police are hunting you. Every time they ram you the <b>BUSTING</b> bar fills up. " +
-                "When it's full, it's game over.\n\nUse the radar (top-left) to see where they're coming from " +
+                "When it's full, it's game over.\n\nUse the radar (top-left) to see where they're coming from. " +
+                "Grab pickups: <b>orange</b> = nitro, <b>green</b> = repair (empties BUSTING), <b>blue</b> = +5 s. Dodge the traffic, " +
                 "and escape for as long as you can!",
                 howToBody);
-            if (GUI.Button(new Rect(bx, Screen.height - 150 * s, bw, bh), "BACK", primaryBtn)) showPauseHowTo = false;
+            if (Btn(new Rect(bx, Screen.height - 150 * s, bw, bh), "BACK", primaryBtn)) showPauseHowTo = false;
             return;
         }
 
-        float by = Screen.height * 0.40f, gap = 24f * s;
-        if (GUI.Button(new Rect(bx, by, bw, bh), "RESUME", primaryBtn)) GameState.Resume();
-        if (GUI.Button(new Rect(bx, by + (bh + gap), bw, bh), "RESTART", secondaryBtn)) GameState.Retry();
-        if (GUI.Button(new Rect(bx, by + 2 * (bh + gap), bw, bh), "HOW TO PLAY", secondaryBtn)) showPauseHowTo = true;
+        float by = Screen.height * 0.34f, gap = 18f * s;
+        if (Btn(new Rect(bx, by, bw, bh), "RESUME", primaryBtn)) GameState.Resume();
+        if (Btn(new Rect(bx, by + (bh + gap), bw, bh), "RESTART", secondaryBtn)) GameState.Retry();
+        if (Btn(new Rect(bx, by + 2 * (bh + gap), bw, bh), "HOW TO PLAY", secondaryBtn)) showPauseHowTo = true;
+        if (Btn(new Rect(bx, by + 3 * (bh + gap), bw, bh), "OPTIONS", secondaryBtn)) showOptions = true;
         // Extra space before the "leave" button, like a separate group.
-        if (GUI.Button(new Rect(bx, by + 3 * (bh + gap) + 40 * s, bw, bh), "QUIT RACE", secondaryBtn))
+        if (Btn(new Rect(bx, by + 4 * (bh + gap) + 36 * s, bw, bh), "QUIT RACE", secondaryBtn))
         {
             showPauseHowTo = false;
+            showOptions = false;
             GameState.GoToMenu();
         }
     }
@@ -216,8 +309,8 @@ public class MainMenu : MonoBehaviour
         GUI.Label(new Rect(0, y + 135, Screen.width, 40),
             newRecord ? "NEW RECORD!" : $"Best: {GameState.BestEscapeTime:0.0}s", subtitle);
 
-        if (GUI.Button(new Rect(cx - 140, y + 200, 280, 60), "TRY AGAIN", button)) GameState.Retry();
-        if (GUI.Button(new Rect(cx - 140, y + 275, 280, 60), "MAIN MENU", button)) GameState.GoToMenu();
+        if (Btn(new Rect(cx - 140, y + 200, 280, 60), "TRY AGAIN", button)) GameState.Retry();
+        if (Btn(new Rect(cx - 140, y + 275, 280, 60), "MAIN MENU", button)) GameState.GoToMenu();
     }
 
     private static void Dim(float alpha)

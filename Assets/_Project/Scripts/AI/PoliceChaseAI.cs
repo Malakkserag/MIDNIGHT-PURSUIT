@@ -59,6 +59,12 @@ public class PoliceChaseAI : MonoBehaviour
         set => target = value;
     }
 
+    /// <summary>Empties the BUSTING meter of every police car (Repair pickup).</summary>
+    public static void ClearAllBustProgress()
+    {
+        foreach (PoliceChaseAI p in FindObjectsByType<PoliceChaseAI>(FindObjectsSortMode.None)) p.closeTimer = 0f;
+    }
+
     public void SetSirenLights(Light red, Light blue)
     {
         redLight = red;
@@ -256,7 +262,8 @@ public class PoliceChaseAI : MonoBehaviour
         Vector3 to = target.position + Vector3.up * 0.8f;
         foreach (RaycastHit h in Physics.RaycastAll(from, (to - from).normalized, Vector3.Distance(from, to)))
         {
-            if (h.collider.transform.IsChildOf(transform) || h.collider.transform.IsChildOf(target)) continue;
+            if (h.collider.isTrigger || h.collider.transform.IsChildOf(transform) || h.collider.transform.IsChildOf(target)) continue;
+            if (h.rigidbody != null) continue; // other cars (traffic) don't block the view of the player
             return false;
         }
         return true;

@@ -72,11 +72,17 @@ public class RaceHUD : MonoBehaviour
 
     private MainMenu menu;
 
+    /// <summary>Bonus seconds (TIME pickup).</summary>
+    public void AddEscapeTime(float seconds) => escapeTime += seconds;
+
     private void Awake()
     {
         GameState.OnSceneStart();
         if (GetComponent<Minimap>() == null) gameObject.AddComponent<Minimap>();
         if (GetComponent<GLRadar>() == null) gameObject.AddComponent<GLRadar>();
+        if (GetComponent<AudioManager>() == null) gameObject.AddComponent<AudioManager>();
+        if (GetComponent<PickupSpawner>() == null) gameObject.AddComponent<PickupSpawner>();
+        if (GetComponent<TrafficManager>() == null) gameObject.AddComponent<TrafficManager>();
         menu = GetComponent<MainMenu>();
         if (menu == null) menu = gameObject.AddComponent<MainMenu>();
     }
